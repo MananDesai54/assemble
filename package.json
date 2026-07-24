@@ -1,0 +1,16 @@
+{
+  "name": "assemble",
+  "version": "0.1.0",
+  "description": "Avengers, assemble. Desk-tap macro pad: mic → 4 programmable desk zones.",
+  "main": "src/main/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "electron .",
+    "test": "vitest run"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "vitest": "^2.0.0"
+  }
+}
