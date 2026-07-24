@@ -1,0 +1,37 @@
+:root {
+  --bg: #0b0f14; --panel: #121924; --text: #d7e3f4; --dim: #6b7c93;
+  --reactor: #4fd8ff;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 14px/1.5 -apple-system, sans-serif; padding: 16px; }
+header { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+h1 { letter-spacing: 0.35em; font-weight: 800; }
+.armed-toggle { margin-left: auto; color: var(--dim); }
+#reactor {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, var(--reactor) 40%, transparent 70%);
+  box-shadow: 0 0 12px var(--reactor);
+  transition: transform 80ms, box-shadow 80ms;
+}
+#reactor.pulse { transform: scale(1.5); box-shadow: 0 0 34px var(--reactor); }
+#controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+#controls label { color: var(--dim); display: flex; align-items: center; gap: 8px; }
+#controls select { background: #0e1520; color: var(--text); border: 1px solid #24344a; border-radius: 6px; padding: 6px; }
+#calibration-status { color: var(--dim); font-size: 12px; }
+#zones { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+.zone-card {
+  background: var(--panel); border: 1px solid #1f2c3d; border-radius: 12px; padding: 14px;
+  border-top: 3px solid var(--zone-color);
+  transition: box-shadow 120ms;
+}
+.zone-card.fired { box-shadow: 0 0 24px var(--zone-color); }
+.zone-card h3 { color: var(--zone-color); }
+.zone-card .position { color: var(--dim); font-size: 12px; }
+.zone-card select, .zone-card input { width: 100%; margin-top: 6px; background: #0e1520; color: var(--text); border: 1px solid #24344a; border-radius: 6px; padding: 6px; }
+#wizard { background: var(--panel); border-radius: 12px; padding: 20px; margin: 16px 0; }
+#wizard-progress { margin: 12px 0; font-size: 20px; font-weight: 700; color: var(--reactor); }
+#log-panel h2 { font-size: 13px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px; }
+#log { list-style: none; max-height: 160px; overflow-y: auto; color: var(--dim); font-family: ui-monospace, monospace; font-size: 12px; }
+#log .hit { color: var(--text); }
+button { background: #16233a; color: var(--text); border: 1px solid #2c4468; border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+button:hover { background: #1d2f4e; }
