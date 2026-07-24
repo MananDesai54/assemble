@@ -52,7 +52,7 @@ Per zone card:
 | Shell command | `say "assemble"` | anything zsh runs |
 | Keystroke | `cmd+shift+4` | needs Accessibility permission (System Settings → Privacy & Security → Accessibility → enable Electron/ASSEMBLE) |
 | Open app / URL | `https://github.com` or `/Applications/Spotify.app` | |
-| System preset | volume up/down, mute toggle, lock screen, screenshot (full / select-region) | screenshots land on Desktop; app needs Screen Recording permission |
+| System preset | volume up/down, mute toggle, lock screen, screenshot (full / select-region) | screenshots go to clipboard; app needs Screen Recording permission. Want a file instead? Use a Shell action: `screencapture -x ~/Desktop/shot.png` |
 
 ## Tray
 

@@ -13,8 +13,8 @@ export const SYSTEM_PRESETS = {
   'volume-down': `osascript -e 'set volume output volume (((output volume of (get volume settings)) - 10))'`,
   'mute-toggle': `osascript -e 'set volume output muted (not (output muted of (get volume settings)))'`,
   'lock-screen': `osascript -e 'tell application "System Events" to keystroke "q" using {command down, control down}'`,
-  'screenshot':  `screencapture -x "$HOME/Desktop/assemble-$(date +%s).png"`,
-  'screenshot-region': `screencapture -i "$HOME/Desktop/assemble-$(date +%s).png"`,
+  'screenshot':  `screencapture -x -c`,
+  'screenshot-region': `screencapture -i -c`,
 };
 
 function keystrokeCommand(value) {
