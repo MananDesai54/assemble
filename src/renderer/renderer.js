@@ -58,7 +58,8 @@ function renderZoneCards() {
         <option value="volume-down">Volume down</option>
         <option value="mute-toggle">Mute toggle</option>
         <option value="lock-screen">Lock screen</option>
-        <option value="screenshot">Screenshot</option>
+        <option value="screenshot">Screenshot (full screen)</option>
+        <option value="screenshot-region">Screenshot (select region)</option>
       </select>`;
     const typeSel = card.querySelector('.action-type');
     const valInput = card.querySelector('.action-value');
