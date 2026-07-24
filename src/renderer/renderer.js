@@ -50,7 +50,7 @@ function renderZoneCards() {
         <option value="shell">Shell command</option>
         <option value="keystroke">Keystroke</option>
         <option value="open">Open app / URL</option>
-        <option value="system">System preset</option>
+        <option value="system">System (screenshot, volume, lock…)</option>
       </select>
       <input class="action-value" placeholder="value" />
       <select class="system-preset" hidden>
