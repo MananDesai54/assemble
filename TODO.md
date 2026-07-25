@@ -6,3 +6,4 @@
 - [ ] **Support more automations** — grow the automation catalog beyond the current presets (more triggers, more actions, user-composable).
 - [ ] **Note taking** — capture and organize notes locally.
 - [ ] **Learning section** — a place that surfaces what the system has learned about how I work.
+- [ ] **More interaction types** — improve STT as an interaction path, and add other tap/gesture types beyond corner knocks (scratches, slides, new surfaces) for triggering actions.
