@@ -127,3 +127,26 @@ describe('draftReply', () => {
     expect(out).toBe('Sounds good, shipping it today.');
   });
 });
+
+describe('digestMessages context budget', () => {
+  it('caps prompt size and keeps the newest messages', async () => {
+    const calls: any[] = [];
+    const { llm } = fakeLlm('summary', calls);
+    const messages = Array.from({ length: 500 }, (_, i) => ({
+      channelName: 'general', userName: 'u', text: `msg-${i} ${'x'.repeat(200)}`,
+    }));
+    await digestMessages(llm, messages);
+    const sent = calls[0].body.messages[1].content as string;
+    expect(sent.length).toBeLessThanOrEqual(18_000);
+    expect(sent).toContain('msg-499'); // newest kept
+    expect(sent).not.toContain('msg-0 '); // oldest dropped
+  });
+
+  it('truncates a single huge message line', async () => {
+    const calls: any[] = [];
+    const { llm } = fakeLlm('summary', calls);
+    await digestMessages(llm, [{ channelName: 'c', userName: 'u', text: 'y'.repeat(50_000) }]);
+    const sent = calls[0].body.messages[1].content as string;
+    expect(sent.length).toBeLessThanOrEqual(600);
+  });
+});

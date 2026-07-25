@@ -48,7 +48,10 @@ export class Llm {
       },
       body: JSON.stringify({ model: this.model, messages, max_tokens: maxTokens, temperature }),
     });
-    if (!res.ok) throw new Error(`llm http ${res.status}`);
+    if (!res.ok) {
+      const detail = await res.text().then(t => t.slice(0, 200)).catch(() => '');
+      throw new Error(`llm http ${res.status}${detail ? ` — ${detail}` : ''}`);
+    }
     const data = await res.json() as { choices?: { message?: { content?: string } }[] };
     return data.choices?.[0]?.message?.content ?? '';
   }
@@ -93,9 +96,21 @@ export async function scoreUrgency(llm: Llm, msg: MessageLike): Promise<UrgencyV
   return { urgent: parsed.urgent, reason: String(parsed.reason ?? '') };
 }
 
+// Keep digest input inside the local model's context window (8k tokens by
+// default) — newest messages win when there's too much history.
+const DIGEST_CHAR_BUDGET = 18_000;
+
 export async function digestMessages(llm: Llm, messages: MessageLike[]): Promise<string> {
   if (messages.length === 0) return 'Nothing new.';
-  const body = messages.map(fmt).join('\n');
+  const lines: string[] = [];
+  let used = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const line = fmt(messages[i]).slice(0, 600);
+    if (used + line.length > DIGEST_CHAR_BUDGET) break;
+    lines.unshift(line);
+    used += line.length + 1;
+  }
+  const body = lines.join('\n');
   return (await llm.chat([
     { role: 'system', content:
       'Summarize these Slack messages for a software engineer catching up. ' +
