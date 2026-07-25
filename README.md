@@ -7,7 +7,7 @@
 - **Blow at the mic** → one more trigger (classic: sleep the display).
 - **Wave a hand** left or right of the screen → two more, via low-res local motion detection.
 
-![Main screen, dark theme](docs/screenshots/main-dark.png)
+![assemble](docs/screenshots/landing.png)
 
 ## How it works
 
@@ -39,13 +39,15 @@ If macOS claims "Electron.app contains malware": XProtect false-positive on stal
 
 ### 1. First run — setup
 
-![Welcome screen](docs/screenshots/welcome.png)
 
-Click **Set up**. Pick your microphone and tap the desk — the level meter should jump. If it doesn't, choose a different input or check System Settings → Privacy & Security → Microphone.
+
+Fresh installs land on a full-screen intro — **Get started** walks through microphone,
+teaching, local AI, and connections with a progress stepper; every step skippable.
+Pick your microphone and tap the desk — the level meter should jump. If it doesn't, choose a different input or check System Settings → Privacy & Security → Microphone.
 
 ### 2. Teach the corners
 
-![Teaching screen](docs/screenshots/teach.png)
+
 
 The highlighted corner on the desk map is the one to tap. Knock that corner of your **desk** 10 times with a knuckle, varying strength a little. The map mirrors your real desk; the dot in the middle is your mic.
 
@@ -70,7 +72,7 @@ Click a corner card — each corner takes up to three actions, one per knock pat
 | Press a shortcut | `cmd+shift+4` | needs Accessibility permission (System Settings → Privacy & Security) |
 | Open app or link | `https://github.com` or `/Applications/Spotify.app` | |
 
-### More triggers (below the desk map)
+### More triggers (Settings → Gestures)
 
 - **Whistle slides system volume** — sustain a whistle and bend the pitch up/down; each ~semitone step nudges the volume. Toggle it on, whistle a slide, watch the volume HUD.
 - **Blow at the mic** — half a second of sustained blowing fires its assigned action. Tuned to ignore taps (too short) and whistles/speech (too tonal).
@@ -78,7 +80,7 @@ Click a corner card — each corner takes up to three actions, one per knock pat
 
 ### 4. Daily use
 
-![Main screen, light theme](docs/screenshots/main-light.png)
+![Desk page](docs/screenshots/app.png)
 
 - Every sound the app hears ripples from the mic dot; a recognized tap lights its corner and shows up in **Activity** with its confidence.
 - **Listening** switch (top right, or the ◉ menubar item) is the master arm/disarm — flip it off for meetings.
@@ -122,10 +124,10 @@ bun start             # build + launch desktop app
 bun run server        # local daemon (Slack + AI endpoints)
 ```
 
-### Power-ups (in-app setup, all local)
+### Local AI (in-app setup)
 
-Onboarding ends on the **Power-ups** screen (later: Setup button on the main screen).
-One click installs everything, with live progress:
+Onboarding's **Brain** step — or Settings → Local AI anytime — installs everything
+with one click and live progress:
 
 - llama.cpp + whisper.cpp (via Homebrew)
 - whisper medium model (1.5 GB) — speech-to-text
@@ -135,12 +137,12 @@ One click installs everything, with live progress:
 No cloud AI, ever. Everything runs on this Mac. With the brain on:
 
 - **Urgent pings** — every captured Slack message is triaged locally; genuinely urgent ones raise a macOS notification.
-- **Digest** — button in the Slack pane summarizes everything since your last digest.
+- **Digest** — button on the Slack page summarizes everything since your last digest.
 - **Draft replies** — click any message → local draft → edit → "Send to Slack". Nothing sends without your click.
 
 ### Slack
 
-Paste your tokens straight into the Power-ups screen (`xapp-…` app token with
+Paste your tokens into onboarding's **Connect** step or Settings → Connections (`xapp-…` app token with
 `connections:write` + `xoxb-…` bot token; Socket Mode enabled on the app — no public
 URL needed). Bot must be invited to channels you want captured. `.env` values work as
 a fallback for headless runs.

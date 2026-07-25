@@ -10,6 +10,10 @@ import { ConfigStore, type ConfigPatch } from './config-store';
 import { createTray } from './tray';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+// Keep the pre-monorepo identity: config lives in …/Application Support/assemble
+app.setName('assemble');
+app.setPath('userData', join(app.getPath('appData'), 'assemble'));
 let win: BrowserWindow;
 let trayHandle: ReturnType<typeof createTray>;
 let store: ConfigStore;

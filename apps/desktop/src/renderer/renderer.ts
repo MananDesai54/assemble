@@ -4,6 +4,7 @@ import { fingerprint, TapClassifier, RhythmMatcher, WhistleController, BlowDetec
 import type { RhythmPattern } from '@assemble/dsp';
 import { createEngine, type Engine } from './engine';
 import { createCamera, type Camera } from './camera';
+import { startBackground, type Bg } from './background';
 
 declare global {
   interface Window {
@@ -22,9 +23,14 @@ declare global {
 
 // UI layer: querySelector results used freely — typed as any on purpose.
 const $ = (sel: string): any => document.querySelector(sel);
+const SERVER = 'http://127.0.0.1:4817';
 const TAPS_PER_ZONE = 10;
 const NOISE_SECONDS = 10;
 const PATTERNS = [1, 2, 3] as const;
+
+type Mode = 'loading' | 'landing' | 'setup' | 'app';
+type Page = 'desk' | 'slack' | 'calls' | 'work' | 'activity' | 'settings';
+type SettingsTab = 'general' | 'gestures' | 'connections' | 'ai';
 
 interface TeachState {
   stepIdx: number;
@@ -42,10 +48,17 @@ const state = {
   rhythm: new RhythmMatcher(),
   rhythmTimer: null as ReturnType<typeof setTimeout> | null,
   lastConfidence: 1,
-  screen: 'loading' as 'loading' | 'welcome' | 'mic' | 'teach' | 'power' | 'main',
+  mode: 'loading' as Mode,
+  page: 'desk' as Page,
+  settingsTab: 'general' as SettingsTab,
+  setupStep: 0,
+  setupReturn: false,     // re-teach launched from the app → return to app after
   teach: null as TeachState | null,
   micError: null as string | null,
+  activity: [] as { time: string; text: string; hit: boolean }[],
 };
+
+let bg: Bg;
 
 const PRESET_NAMES: Record<string, string> = {
   'volume-up': 'Volume up', 'volume-down': 'Volume down', 'mute-toggle': 'Mute toggle',
@@ -58,6 +71,7 @@ const TYPE_NAMES: Record<string, string> = { shell: 'Run', keystroke: 'Press', o
 void init();
 
 async function init() {
+  bg = startBackground($('#bg'));
   state.config = await window.assemble.getConfig();
   if (state.config.classifier) state.classifier = TapClassifier.fromJSON(state.config.classifier);
   applyTheme();
@@ -72,7 +86,8 @@ async function init() {
   } catch (err) {
     state.micError = (err as Error).message;
   }
-  goto(state.config.onboarded ? 'main' : 'welcome');
+  openWs();
+  setMode(state.config.onboarded ? 'app' : 'landing');
 }
 
 /* ================= theme ================= */
@@ -112,7 +127,7 @@ async function startEngine() {
 }
 
 async function syncCamera() {
-  const wanted = state.config.extras.camera.enabled && state.screen === 'main';
+  const wanted = state.config.extras.camera.enabled && state.mode === 'app';
   if (wanted && !state.camera) {
     try {
       state.camera = await createCamera({
@@ -138,6 +153,7 @@ async function syncCamera() {
 
 function setStatus() {
   const el = $('#status');
+  if (!el) return;
   if (state.micError) { el.dataset.state = 'error'; $('#status-text').textContent = 'microphone unavailable'; return; }
   if (!state.engine) { el.dataset.state = 'off'; $('#status-text').textContent = 'starting…'; return; }
   if (state.config.armed) { el.dataset.state = 'live'; $('#status-text').textContent = 'listening'; }
@@ -145,6 +161,7 @@ function setStatus() {
 }
 
 function handleLevel(rms: number) {
+  bg?.setLevel(rms);
   const meter = $('.meter');
   if (!meter) return;
   const bars = meter.children;
@@ -154,7 +171,7 @@ function handleLevel(rms: number) {
 
 function handleChunk(chunk: Float32Array) {
   if (voiceSess.active) voiceCollect(chunk);
-  if (state.screen !== 'main') return;
+  if (state.mode !== 'app') return;
   const now = performance.now();
   if (state.config.extras.whistleVolume && state.whistle) {
     for (const ev of state.whistle.push(chunk, now)) {
@@ -174,8 +191,8 @@ function handleChunk(chunk: Float32Array) {
 function handleFrame(frame: Float32Array, sampleRate: number) {
   rippleDesk();
   const vec = fingerprint(frame, sampleRate);
-  if (state.screen === 'teach') { teachCollect(vec); return; }
-  if (state.screen !== 'main') return;
+  if (state.mode === 'setup' && state.setupStep === 1) { teachCollect(vec); return; }
+  if (state.mode !== 'app') return;
   const r = state.classifier.classify(vec);
   if (r.label === REJECT_LABEL) {
     if (Number.isFinite(r.distance)) logLine('ignored a sound');
@@ -204,7 +221,7 @@ function firePattern({ zone, count }: RhythmPattern) {
   window.assemble.tap(zone, state.lastConfidence, count);
 }
 
-/* ================= voice commands ================= */
+/* ================= voice ================= */
 
 const voiceSess = {
   active: false,
@@ -259,9 +276,8 @@ async function voiceStop() {
       toast(`Heard ${heard} — no command matched.`);
       logLine(`voice · ${heard} · no match`);
     } else if (data.intent?.kind === 'digest' && data.result) {
-      const out = $('#digest-out');
-      if (out) { out.hidden = false; out.textContent = data.result; }
-      toast('Digest ready.');
+      if (state.page === 'slack') { const out = $('#digest-out'); if (out) { out.hidden = false; out.textContent = data.result; } }
+      toast('Digest ready — Slack page.');
       logLine(`voice · ${heard} · digest`, true);
     } else {
       toast(`${heard} → ${data.result ?? data.intent.kind}`);
@@ -272,86 +288,511 @@ async function voiceStop() {
   }
 }
 
-/* ================= navigation ================= */
+/* ================= mode router ================= */
 
-function goto(screen: 'welcome' | 'mic' | 'teach' | 'power' | 'main') {
-  state.screen = screen;
-  ({ welcome: renderWelcome, mic: renderMic, teach: renderTeach, power: renderPower, main: renderMain })[screen]();
-  $('#armed-wrap').hidden = screen !== 'main';
+function setMode(mode: Mode) {
+  state.mode = mode;
+  $('#topbar').hidden = mode === 'landing';
+  $('#armed-wrap').hidden = mode !== 'app';
+  bg?.setBoost(mode !== 'app');
+  if (mode === 'landing') renderLanding();
+  if (mode === 'setup') renderSetup();
+  if (mode === 'app') renderApp();
   setStatus();
   void syncCamera();
 }
 
-/* ================= screens ================= */
+/* ================= landing ================= */
 
-function renderWelcome() {
+function renderLanding() {
   $('#screen').innerHTML = `
-    <div class="center-col">
-      <div>
-        <div class="eyebrow">welcome</div>
-        <h1>Your desk is the keyboard.</h1>
+    <div class="landing">
+      <div class="landing-inner">
+        <div class="hero-word">assemble</div>
+        <p class="hero-tag">Your desk is the input device.</p>
+        <div class="hero-chips">
+          <span class="chip" style="animation-delay:.15s">knock the desk</span>
+          <span class="chip" style="animation-delay:.3s">whistle · blow · wave</span>
+          <span class="chip" style="animation-delay:.45s">speak commands</span>
+          <span class="chip" style="animation-delay:.6s">local AI, zero cloud</span>
+        </div>
+        <div class="hero-cta">
+          <button class="primary big" id="get-started">Get started</button>
+          <button class="quiet-link" id="skip-landing">Skip — explore first</button>
+        </div>
       </div>
-      <p class="lede">assemble listens through the microphone. Tap a corner of your desk and it runs whatever you assigned there — a shortcut, a screenshot, a command.</p>
-      <div class="steps-row">
-        <div class="step"><b>Tap</b><span>Knock a corner of the desk</span></div>
-        <div class="step"><b>Teach</b><span>Show it each corner once</span></div>
-        <div class="step"><b>Trigger</b><span>Taps run your actions</span></div>
-      </div>
-      <button class="primary" id="cta">Set up</button>
     </div>`;
-  $('#cta').onclick = () => goto('mic');
+  $('#get-started').onclick = () => { state.setupStep = 0; setMode('setup'); };
+  $('#skip-landing').onclick = async () => {
+    state.config.onboarded = true;
+    await window.assemble.setConfig({ onboarded: true });
+    setMode('app');
+  };
 }
 
-function renderMic() {
+/* ================= setup wizard ================= */
+
+const SETUP_LABELS = ['Microphone', 'Teach', 'Brain', 'Connect', 'Ready'];
+
+function renderSetup() {
   $('#screen').innerHTML = `
-    <div class="center-col">
-      <div>
-        <div class="eyebrow">step 1 of 2 · microphone</div>
-        <h1>Can it hear your desk?</h1>
+    <div class="setup-shell">
+      <div class="stepper">
+        ${SETUP_LABELS.map((l, i) => `
+          <div class="step-dot ${i < state.setupStep ? 'done' : ''} ${i === state.setupStep ? 'now' : ''}">
+            <i>${i < state.setupStep ? '✓' : i + 1}</i><span>${l}</span>
+          </div>${i < SETUP_LABELS.length - 1 ? '<div class="step-line"></div>' : ''}`).join('')}
       </div>
-      <p class="lede" id="mic-hint">Tap the desk — the meter should jump.</p>
-      <div class="meter">${'<i></i>'.repeat(16)}</div>
-      <label style="align-self:center; display:flex; gap:8px; align-items:center; color:var(--dim);">
-        Microphone
-        <select id="device"></select>
-      </label>
-      <button class="primary" id="cta">It jumps — continue</button>
+      <div class="setup-body" id="setup-body"></div>
     </div>`;
+  [stepMic, stepTeach, stepBrain, stepConnect, stepReady][state.setupStep]();
+}
+
+function setupNext() {
+  if (state.setupReturn) { state.setupReturn = false; setMode('app'); return; }
+  state.setupStep = Math.min(SETUP_LABELS.length - 1, state.setupStep + 1);
+  renderSetup();
+}
+
+function stepFooter(body: HTMLElement, { next = 'Continue', skippable = true }: { next?: string; skippable?: boolean } = {}) {
+  const row = document.createElement('div');
+  row.className = 'setup-footer';
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = next;
+  btn.onclick = setupNext;
+  row.appendChild(btn);
+  if (skippable) {
+    const skip = document.createElement('button');
+    skip.className = 'quiet-link';
+    skip.textContent = 'Skip for now';
+    skip.onclick = setupNext;
+    row.appendChild(skip);
+  }
+  body.appendChild(row);
+}
+
+function stepMic() {
+  const body = $('#setup-body');
+  body.innerHTML = `
+    <div class="eyebrow">step 1 · microphone</div>
+    <h1>Can it hear your desk?</h1>
+    <p class="lede" id="mic-hint">Tap the desk — the meter should jump.</p>
+    <div class="meter">${'<i></i>'.repeat(16)}</div>
+    <label class="inline-label">Microphone <select id="device"></select></label>`;
   if (state.micError) {
     $('#mic-hint').textContent = `Microphone unavailable: ${state.micError}. Allow access in System Settings → Privacy & Security → Microphone, then relaunch.`;
-    $('#cta').disabled = true;
   }
   void populateDevices();
   $('#device').onchange = onDeviceChange;
-  $('#cta').onclick = () => goto('teach');
+  stepFooter(body, { next: 'It jumps — continue' });
 }
 
-function renderTeach() {
+function stepTeach() {
   state.classifier = new TapClassifier();
   state.teach = { stepIdx: 0, secondsLeft: null, timer: null };
-  $('#screen').innerHTML = `
-    <div class="center-col" style="max-width: 780px;">
-      <div>
-        <div class="eyebrow">step 2 of 2 · teach</div>
-        <h1 id="teach-title"></h1>
+  const body = $('#setup-body');
+  body.innerHTML = `
+    <div class="eyebrow">step 2 · teach</div>
+    <h1 id="teach-title"></h1>
+    <p class="lede" id="teach-hint"></p>
+    <div class="desk-wrap">
+      <div class="desk" id="desk">
+        ${ZONES.map(z => `<div class="corner" data-zone="${z.id}">
+            <span class="pos">${z.label}</span>
+            <span class="count" id="count-${z.id}">·</span>
+          </div>`).join('')}
+        <div class="mic-dot" title="your microphone"></div>
       </div>
-      <p class="lede" id="teach-hint"></p>
-      <div class="desk-wrap">
-        <div class="desk" id="desk">
-          ${ZONES.map(z => `<div class="corner" data-zone="${z.id}">
-              <span class="pos">${z.label}</span>
-              <span class="count" id="count-${z.id}">·</span>
-            </div>`).join('')}
-          <div class="mic-dot" title="your microphone"></div>
-        </div>
-      </div>
-      <div class="progress-line" id="teach-progress"></div>
-      <div id="teach-extra"></div>
-      <button class="quiet-link" id="teach-cancel">${state.config.onboarded ? 'Cancel' : 'Skip for now'}</button>
-    </div>`;
+    </div>
+    <div class="progress-line" id="teach-progress"></div>
+    <div id="teach-extra"></div>
+    <div class="setup-footer"><button class="quiet-link" id="teach-cancel">Skip for now</button></div>`;
   $('#teach-cancel').onclick = cancelTeach;
   renderTeachStep();
 }
+
+function stepBrain() {
+  const body = $('#setup-body');
+  body.innerHTML = `
+    <div class="eyebrow">step 3 · brain</div>
+    <h1>Give it a brain.</h1>
+    <p class="lede">Everything installs and runs on this Mac — no cloud AI, nothing leaves your machine. Powers Slack triage, digests, drafts, call summaries, and voice commands.</p>
+    <div class="setup-rows" id="setup-rows">
+      ${SETUP_ROWS.map(r => `
+        <div class="setup-row" data-step="${r.step}">
+          <span class="state todo">○</span>
+          <span>${r.label}</span>
+          <span class="line" hidden></span>
+        </div>`).join('')}
+    </div>
+    <button class="primary" id="install-all">Install everything</button>`;
+  void refreshSetupStatus();
+  $('#install-all').onclick = installEverything;
+  stepFooter(body);
+}
+
+function stepConnect() {
+  const body = $('#setup-body');
+  body.innerHTML = `
+    <div class="eyebrow">step 4 · connect</div>
+    <h1>Wire in your work.</h1>
+    <div class="setup-inputs">
+      <b>Slack</b>
+      <span class="hint">api.slack.com → your app → Socket Mode on. App token needs <code>connections:write</code>.</span>
+      <input id="slack-app-token" type="password" placeholder="xapp-… app-level token" />
+      <input id="slack-bot-token" type="password" placeholder="xoxb-… bot token" />
+      <button class="secondary" id="slack-connect">Connect Slack</button>
+      <span id="slack-setup-status" class="hint"></span>
+    </div>
+    <div class="setup-inputs">
+      <b>Linear</b>
+      <span class="hint">linear.app → Settings → API → personal key. Issues become one-click Claude Code sessions.</span>
+      <input id="linear-key" type="password" placeholder="lin_api_…" />
+      <button class="secondary" id="linear-connect">Connect Linear</button>
+      <span id="linear-setup-status" class="hint"></span>
+    </div>`;
+  $('#slack-connect').onclick = connectSlackTokens;
+  $('#linear-connect').onclick = connectLinearKey;
+  void refreshSetupStatus();
+  stepFooter(body);
+}
+
+function stepReady() {
+  const body = $('#setup-body');
+  body.innerHTML = `
+    <div class="ready-mark">✓</div>
+    <h1>Assembled.</h1>
+    <p class="lede">Knock a desk corner to trigger it. Hold nothing — just knuckles, whistles, and words.<br/>
+    Everything lives in the sidebar; every knob is in Settings.</p>
+    <div class="setup-footer"><button class="primary big" id="enter-app">Open assemble</button></div>`;
+  $('#enter-app').onclick = async () => {
+    state.config.onboarded = true;
+    await window.assemble.setConfig({ onboarded: true });
+    setMode('app');
+    toast('Click a corner to choose what it does.');
+  };
+}
+
+/* ================= app shell ================= */
+
+const NAV: { page: Page; label: string; icon: string }[] = [
+  { page: 'desk', label: 'Desk', icon: '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>' },
+  { page: 'slack', label: 'Slack', icon: '<svg viewBox="0 0 16 16"><path d="M6 1v6M10 9v6M1 10h6M9 6h6" stroke-width="2" stroke-linecap="round"/></svg>' },
+  { page: 'calls', label: 'Calls', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke-width="1.6"/><circle cx="8" cy="8" r="2"/></svg>' },
+  { page: 'work', label: 'Work', icon: '<svg viewBox="0 0 16 16"><path d="M2 4l4 4-4 4M8 12h6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+  { page: 'activity', label: 'Activity', icon: '<svg viewBox="0 0 16 16"><path d="M1 8h3l2-5 4 10 2-5h3" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+  { page: 'settings', label: 'Settings', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.4" fill="none" stroke-width="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M13 3l-1.7 1.7M4.7 11.3L3 13" stroke-width="1.6" stroke-linecap="round"/></svg>' },
+];
+
+function renderApp() {
+  $('#screen').innerHTML = `
+    <div class="shell">
+      <nav class="sidenav">
+        ${NAV.map(n => `
+          <button class="nav-item" data-page="${n.page}">
+            ${n.icon}<span>${n.label}</span>
+          </button>`).join('')}
+      </nav>
+      <main class="page" id="page"></main>
+    </div>`;
+  document.querySelectorAll('.nav-item').forEach(el => {
+    (el as HTMLElement).onclick = () => setPage((el as HTMLElement).dataset.page as Page);
+  });
+  setPage(state.page);
+}
+
+function setPage(page: Page) {
+  state.page = page;
+  document.querySelectorAll('.nav-item').forEach(el =>
+    el.classList.toggle('active', (el as HTMLElement).dataset.page === page));
+  const el = $('#page');
+  el.classList.remove('page-in');
+  void el.offsetWidth;
+  el.classList.add('page-in');
+  ({ desk: pageDesk, slack: pageSlack, calls: pageCalls, work: pageWork, activity: pageActivity, settings: pageSettings })[page]();
+}
+
+/* ================= page: desk ================= */
+
+function pageDesk() {
+  $('#page').innerHTML = `
+    <div class="page-head">
+      <h2>Desk</h2>
+      <p>Four corners × three knock patterns. Click a corner to assign its actions.</p>
+    </div>
+    <div class="desk-wrap">
+      <div class="desk" id="desk">
+        ${ZONES.map(z => `<div class="corner" data-zone="${z.id}" tabindex="0" role="button">
+            <span class="pos">${z.label}</span>
+            <span class="what" id="what-${z.id}"></span>
+          </div>`).join('')}
+        <div class="mic-dot" title="your microphone"></div>
+      </div>
+    </div>
+    <div class="bottom">
+      <span class="hint">${isTrained() ? 'Calibrated.' : 'Not taught yet — corners can’t be told apart.'}</span>
+      <span class="spacer"></span>
+      <button class="secondary" id="reteach">${isTrained() ? 'Re-teach corners' : 'Teach corners'}</button>
+    </div>`;
+  for (const z of ZONES) {
+    updateCornerFace(z.id);
+    const el = $(`.corner[data-zone="${z.id}"]`);
+    el.onclick = () => openEditor(z.id);
+    el.onkeydown = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(z.id); }
+    };
+  }
+  $('#reteach').onclick = () => { state.setupReturn = true; state.setupStep = 1; setMode('setup'); };
+}
+
+/* ================= page: slack ================= */
+
+function pageSlack() {
+  $('#page').innerHTML = `
+    <div class="page-head">
+      <h2>Slack</h2>
+      <p>Everything captured locally. Click a message to draft a reply — nothing sends without you.</p>
+    </div>
+    <div class="pane">
+      <div class="pane-toolbar">
+        <button class="secondary" id="digest-btn" title="Summarize unread since last digest">Digest</button>
+        <span id="slack-status" class="pane-status"></span>
+      </div>
+      <pre id="digest-out" class="digest" hidden></pre>
+      <ul id="slack-log" class="feed"></ul>
+      <div id="draft-box" class="draft-box" hidden>
+        <div class="editor-head"><b id="draft-title"></b><button class="ghost" id="draft-close">✕</button></div>
+        <textarea id="draft-text" rows="3"></textarea>
+        <div style="display:flex; gap:8px;">
+          <button class="secondary" id="draft-send">Send to Slack</button>
+          <button class="secondary" id="draft-again">Redraft</button>
+        </div>
+      </div>
+    </div>`;
+  $('#digest-btn').onclick = runDigest;
+  $('#draft-close').onclick = () => { $('#draft-box').hidden = true; draftTarget = null; };
+  $('#draft-send').onclick = sendDraft;
+  $('#draft-again').onclick = redraft;
+  connectSlackFeed();
+}
+
+/* ================= page: calls ================= */
+
+function pageCalls() {
+  $('#page').innerHTML = `
+    <div class="page-head">
+      <h2>Calls</h2>
+      <p>Records both sides: your mic + system audio. Everyone on the call should know.</p>
+    </div>
+    <div class="pane">
+      <div class="pane-toolbar">
+        <button class="secondary" id="rec-btn">● Record</button>
+        <span id="rec-status" class="pane-status"></span>
+      </div>
+      <ul id="rec-list" class="feed"></ul>
+    </div>`;
+  $('#rec-btn').onclick = toggleRecording;
+  void refreshRecordings();
+}
+
+/* ================= page: work ================= */
+
+function pageWork() {
+  $('#page').innerHTML = `
+    <div class="page-head">
+      <h2>Work</h2>
+      <p>Claude Code sessions in any repo. Pick the directory per run — recents remembered.</p>
+    </div>
+    <div class="pane">
+      <div class="work-form">
+        <div class="work-row">
+          <input id="work-dir" list="work-dirs" placeholder="~/midgard/…  (working directory)" />
+          <datalist id="work-dirs"></datalist>
+        </div>
+        <textarea id="work-prompt" rows="2" placeholder="What should Claude Code do?"></textarea>
+        <div class="work-row">
+          <label class="switch"><input type="checkbox" id="work-skip" />
+            <span>Skip permission prompts (full autonomy in that repo)</span></label>
+          <span class="spacer"></span>
+          <button class="secondary" id="work-run">Run Claude Code</button>
+        </div>
+        <span id="work-status" class="pane-status"></span>
+      </div>
+      <ul id="work-list" class="feed"></ul>
+    </div>
+    <div class="pane">
+      <div class="pane-toolbar"><b class="pane-title">Linear</b><span id="linear-status" class="pane-status"></span></div>
+      <ul id="linear-list" class="feed"></ul>
+    </div>`;
+  $('#work-run').onclick = runAgent;
+  void refreshWork();
+  void refreshLinear();
+}
+
+/* ================= page: activity ================= */
+
+function pageActivity() {
+  $('#page').innerHTML = `
+    <div class="page-head">
+      <h2>Activity</h2>
+      <p>Every gesture, voice command, and rejection — most recent first.</p>
+    </div>
+    <div class="pane"><ul id="log" class="feed"></ul></div>`;
+  const log = $('#log');
+  for (const a of state.activity) {
+    const li = document.createElement('li');
+    li.textContent = `${a.time}  ${a.text}`;
+    if (a.hit) li.className = 'hit';
+    log.appendChild(li);
+  }
+}
+
+/* ================= page: settings ================= */
+
+const TABS: { id: SettingsTab; label: string }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'gestures', label: 'Gestures' },
+  { id: 'connections', label: 'Connections' },
+  { id: 'ai', label: 'Local AI' },
+];
+
+function pageSettings() {
+  $('#page').innerHTML = `
+    <div class="page-head"><h2>Settings</h2></div>
+    <div class="tabs">
+      ${TABS.map(t => `<button class="tab" data-tab="${t.id}">${t.label}</button>`).join('')}
+    </div>
+    <div class="pane" id="tab-body"></div>`;
+  document.querySelectorAll('.tab').forEach(el => {
+    (el as HTMLElement).onclick = () => {
+      state.settingsTab = (el as HTMLElement).dataset.tab as SettingsTab;
+      renderSettingsTab();
+    };
+  });
+  renderSettingsTab();
+}
+
+function renderSettingsTab() {
+  document.querySelectorAll('.tab').forEach(el =>
+    el.classList.toggle('active', (el as HTMLElement).dataset.tab === state.settingsTab));
+  const body = $('#tab-body');
+  if (state.settingsTab === 'general') {
+    body.innerHTML = `
+      <div class="setting-row">
+        <label>Theme</label>
+        <select id="theme-sel">
+          <option value="system">Follow system</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>Microphone</label>
+        <select id="device"></select>
+      </div>
+      <div class="setting-row">
+        <label>Sensitivity <span class="hint">left = softer taps register</span></label>
+        <input type="range" id="sensitivity" min="3" max="15" step="0.5" />
+      </div>`;
+    $('#theme-sel').value = state.config.theme || 'system';
+    $('#theme-sel').onchange = async (e: any) => {
+      state.config.theme = e.target.value;
+      await window.assemble.setConfig({ theme: state.config.theme });
+      applyTheme();
+    };
+    void populateDevices();
+    $('#device').onchange = onDeviceChange;
+    $('#sensitivity').value = state.config.sensitivity;
+    $('#sensitivity').onchange = async (e: any) => {
+      state.config.sensitivity = Number(e.target.value);
+      await window.assemble.setConfig({ sensitivity: state.config.sensitivity });
+      await startEngine();
+    };
+  }
+  if (state.settingsTab === 'gestures') {
+    body.innerHTML = `
+      <div class="setting-row">
+        <label class="switch"><input type="checkbox" id="whistle-toggle" />
+          <span>Whistle slides system volume — pitch up = louder</span></label>
+      </div>
+      <div class="setting-row" id="blow-row">
+        <label>Blow at the mic</label>
+      </div>
+      <div class="setting-row">
+        <label class="switch"><input type="checkbox" id="camera-toggle" />
+          <span>Hand waves via camera — processed locally, nothing recorded</span></label>
+      </div>
+      <div class="setting-row wave-rows" id="wave-rows" hidden>
+        <div><label>Wave on the left</label></div>
+        <div><label>Wave on the right</label></div>
+      </div>
+      <p class="hint">Corner knock patterns are edited on the Desk page. Voice hotkey: Ctrl+Shift+Space.</p>`;
+    $('#whistle-toggle').checked = state.config.extras.whistleVolume;
+    $('#whistle-toggle').onchange = (e: any) => {
+      state.config.extras.whistleVolume = e.target.checked;
+      void window.assemble.setConfig({ extras: { ...state.config.extras, whistleVolume: e.target.checked } });
+    };
+    $('#blow-row').appendChild(actionPicker(state.config.extras.blow.action, action => {
+      state.config.extras.blow.action = action;
+      void window.assemble.setConfig({ extras: { ...state.config.extras, blow: { action } } });
+    }));
+    $('#camera-toggle').checked = state.config.extras.camera.enabled;
+    $('#wave-rows').hidden = !state.config.extras.camera.enabled;
+    $('#camera-toggle').onchange = (e: any) => {
+      state.config.extras.camera.enabled = e.target.checked;
+      $('#wave-rows').hidden = !e.target.checked;
+      void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, enabled: e.target.checked } } });
+      void syncCamera();
+    };
+    const [leftRow, rightRow] = $('#wave-rows').children;
+    leftRow.appendChild(actionPicker(state.config.extras.camera.left.action, action => {
+      state.config.extras.camera.left = { action };
+      void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, left: { action } } } });
+    }));
+    rightRow.appendChild(actionPicker(state.config.extras.camera.right.action, action => {
+      state.config.extras.camera.right = { action };
+      void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, right: { action } } } });
+    }));
+  }
+  if (state.settingsTab === 'connections') {
+    body.innerHTML = `
+      <div class="setup-inputs">
+        <b>Slack</b>
+        <span class="hint">Socket Mode on; app token needs <code>connections:write</code>.</span>
+        <input id="slack-app-token" type="password" placeholder="xapp-… app-level token" />
+        <input id="slack-bot-token" type="password" placeholder="xoxb-… bot token" />
+        <button class="secondary" id="slack-connect">Connect Slack</button>
+        <span id="slack-setup-status" class="hint"></span>
+      </div>
+      <div class="setup-inputs">
+        <b>Linear</b>
+        <input id="linear-key" type="password" placeholder="lin_api_…" />
+        <button class="secondary" id="linear-connect">Connect Linear</button>
+        <span id="linear-setup-status" class="hint"></span>
+      </div>`;
+    $('#slack-connect').onclick = connectSlackTokens;
+    $('#linear-connect').onclick = connectLinearKey;
+    void refreshSetupStatus();
+  }
+  if (state.settingsTab === 'ai') {
+    body.innerHTML = `
+      <p class="hint">All local — llama.cpp + whisper.cpp, Gemma 4 12B. Nothing leaves this Mac.</p>
+      <div class="setup-rows" id="setup-rows">
+        ${SETUP_ROWS.map(r => `
+          <div class="setup-row" data-step="${r.step}">
+            <span class="state todo">○</span>
+            <span>${r.label}</span>
+            <span class="line" hidden></span>
+          </div>`).join('')}
+      </div>
+      <button class="primary" id="install-all">Install everything</button>`;
+    void refreshSetupStatus();
+    $('#install-all').onclick = installEverything;
+  }
+}
+
+/* ================= teach logic ================= */
 
 type TeachStep = { kind: 'zone'; zone: (typeof ZONES)[number] } | { kind: 'noise' };
 
@@ -399,7 +840,7 @@ function renderTeachStep() {
     const over = document.createElement('button');
     over.className = 'secondary';
     over.textContent = 'Start over';
-    over.onclick = () => { if (teach.timer) clearInterval(teach.timer); renderTeach(); };
+    over.onclick = () => { if (teach.timer) clearInterval(teach.timer); stepTeach(); };
     row.appendChild(over);
   }
   extra.appendChild(row);
@@ -436,7 +877,8 @@ function previousStep() {
 }
 
 function teachCollect(vec: Float64Array) {
-  const teach = state.teach!;
+  const teach = state.teach;
+  if (!teach) return;
   const step = teachSteps()[teach.stepIdx];
   if (step.kind === 'zone') {
     state.classifier.addSample(step.zone.id, vec);
@@ -456,172 +898,310 @@ function teachCollect(vec: Float64Array) {
 async function finishTeach() {
   const teach = state.teach!;
   if (teach.timer) clearInterval(teach.timer);
-  const firstRun = !state.config.onboarded;
+  state.teach = null;
   state.config.classifier = state.classifier.toJSON();
-  state.config.onboarded = true;
-  await window.assemble.setConfig({ classifier: state.config.classifier, onboarded: true });
-  goto(firstRun ? 'power' : 'main');
-  if (!firstRun) toast('Ready. Click a corner to choose what it does.');
+  await window.assemble.setConfig({ classifier: state.config.classifier });
+  toast('Corners learned.');
+  setupNext();
 }
 
 function cancelTeach() {
   if (state.teach?.timer) clearInterval(state.teach.timer);
+  state.teach = null;
   state.classifier = state.config.classifier
     ? TapClassifier.fromJSON(state.config.classifier) : new TapClassifier();
-  if (!state.config.onboarded) {
-    state.config.onboarded = true;
-    void window.assemble.setConfig({ onboarded: true });
-  }
-  goto('main');
+  setupNext();
 }
 
-/* ================= main screen ================= */
+/* ================= setup helpers (shared with settings) ================= */
 
-function renderMain() {
-  $('#screen').innerHTML = `
-    <div class="desk-wrap" style="flex:1;">
-      <div class="desk" id="desk">
-        ${ZONES.map(z => `<div class="corner" data-zone="${z.id}" tabindex="0" role="button">
-            <span class="pos">${z.label}</span>
-            <span class="what" id="what-${z.id}"></span>
-          </div>`).join('')}
-        <div class="mic-dot" title="your microphone"></div>
-      </div>
-      <div class="bottom">
-        <label>Microphone <select id="device"></select></label>
-        <label title="Left detects softer taps">Sensitivity <input type="range" id="sensitivity" min="3" max="15" step="0.5" /></label>
-        <span class="spacer"></span>
-        <button class="secondary" id="setup-btn">Setup</button>
-        <button class="secondary" id="reteach">${isTrained() ? 'Re-teach corners' : 'Teach corners'}</button>
-      </div>
-      <section class="extras">
-        <h2>More triggers</h2>
-        <div class="extra-row">
-          <label class="switch"><input type="checkbox" id="whistle-toggle" />
-            <span>Whistle slides system volume — pitch up = louder</span></label>
-        </div>
-        <div class="extra-row" id="blow-row">
-          <span class="extra-label">Blow at the mic</span>
-        </div>
-        <div class="extra-row">
-          <label class="switch"><input type="checkbox" id="camera-toggle" />
-            <span>Hand waves via camera — processed locally, nothing recorded</span></label>
-        </div>
-        <div class="extra-row wave-rows" id="wave-rows" hidden>
-          <div><span class="extra-label">Wave on the left</span></div>
-          <div><span class="extra-label">Wave on the right</span></div>
-        </div>
-      </section>
-      <div class="activity">
-        <h2>Slack
-          <button class="ghost" id="digest-btn" title="Summarize unread since last digest">Digest</button>
-          <span id="slack-status" class="pane-status"></span>
-        </h2>
-        <pre id="digest-out" class="digest" hidden></pre>
-        <ul id="slack-log"></ul>
-        <div id="draft-box" class="draft-box" hidden>
-          <div class="editor-head"><b id="draft-title"></b><button class="ghost" id="draft-close">✕</button></div>
-          <textarea id="draft-text" rows="3"></textarea>
-          <div style="display:flex; gap:8px;">
-            <button class="secondary" id="draft-send">Send to Slack</button>
-            <button class="secondary" id="draft-again">Redraft</button>
-          </div>
-        </div>
-      </div>
-      <div class="activity">
-        <h2>Calls
-          <button class="ghost" id="rec-btn">● Record</button>
-          <span id="rec-status" class="pane-status"></span>
-        </h2>
-        <ul id="rec-list"></ul>
-      </div>
-      <div class="activity">
-        <h2>Work <span id="work-status" class="pane-status"></span></h2>
-        <div class="work-form">
-          <div class="work-row">
-            <input id="work-dir" list="work-dirs" placeholder="~/midgard/…  (working directory)" />
-            <datalist id="work-dirs"></datalist>
-          </div>
-          <textarea id="work-prompt" rows="2" placeholder="What should Claude Code do?"></textarea>
-          <div class="work-row">
-            <label class="switch"><input type="checkbox" id="work-skip" />
-              <span>Skip permission prompts (Claude can run anything in that repo)</span></label>
-            <span class="spacer"></span>
-            <button class="secondary" id="work-run">Run Claude Code</button>
-          </div>
-        </div>
-        <ul id="work-list"></ul>
-      </div>
-      <div class="activity">
-        <h2>Linear <span id="linear-status" class="pane-status"></span></h2>
-        <ul id="linear-list"></ul>
-      </div>
-      <div class="activity">
-        <h2>Activity</h2>
-        <ul id="log"></ul>
-      </div>
-    </div>`;
-  for (const z of ZONES) {
-    updateCornerFace(z.id);
-    const el = $(`.corner[data-zone="${z.id}"]`);
-    el.onclick = () => openEditor(z.id);
-    el.onkeydown = (e: KeyboardEvent) => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(z.id); }
-    };
+const SETUP_ROWS = [
+  { key: 'llamaCpp', step: 'llama.cpp', label: 'AI engine — llama.cpp' },
+  { key: 'whisperCpp', step: 'whisper-cpp', label: 'Speech engine — whisper.cpp' },
+  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model — whisper medium (1.5 GB)' },
+  { key: 'audiotap', step: 'audiotap', label: 'Call capture helper' },
+  { key: 'llmRunning', step: 'llm-start', label: 'Local AI on — Gemma 4 12B (7 GB, first time only)' },
+] as const;
+
+async function refreshSetupStatus(): Promise<Record<string, boolean>> {
+  try {
+    const s = await (await fetch(`${SERVER}/setup/status`)).json();
+    for (const r of SETUP_ROWS) {
+      const el = $(`.setup-row[data-step="${r.step}"] .state`);
+      if (!el) continue;
+      el.textContent = s[r.key] ? '✓' : '○';
+      el.className = `state ${s[r.key] ? 'ok' : 'todo'}`;
+    }
+    const slackStatus = $('#slack-setup-status');
+    if (slackStatus && !slackStatus.textContent) {
+      slackStatus.textContent = s.slackConnected ? 'Connected.' :
+        s.slackConfigured ? 'Tokens saved, not connected — check Socket Mode.' : '';
+    }
+    const linearStatus = $('#linear-setup-status');
+    if (linearStatus && !linearStatus.textContent) {
+      linearStatus.textContent = s.linearConfigured ? 'Key saved.' : '';
+    }
+    return s;
+  } catch {
+    return {};
   }
-  void populateDevices();
-  $('#device').onchange = onDeviceChange;
-  $('#sensitivity').value = state.config.sensitivity;
-  $('#sensitivity').onchange = async (e: any) => {
-    state.config.sensitivity = Number(e.target.value);
-    await window.assemble.setConfig({ sensitivity: state.config.sensitivity });
-    await startEngine();
-  };
-  $('#reteach').onclick = () => goto('teach');
-
-  // extras
-  $('#whistle-toggle').checked = state.config.extras.whistleVolume;
-  $('#whistle-toggle').onchange = (e: any) => {
-    state.config.extras.whistleVolume = e.target.checked;
-    void window.assemble.setConfig({ extras: { ...state.config.extras, whistleVolume: e.target.checked } });
-  };
-  $('#blow-row').appendChild(actionPicker(state.config.extras.blow.action, action => {
-    state.config.extras.blow.action = action;
-    void window.assemble.setConfig({ extras: { ...state.config.extras, blow: { action } } });
-  }));
-  $('#camera-toggle').checked = state.config.extras.camera.enabled;
-  $('#wave-rows').hidden = !state.config.extras.camera.enabled;
-  $('#camera-toggle').onchange = (e: any) => {
-    state.config.extras.camera.enabled = e.target.checked;
-    $('#wave-rows').hidden = !e.target.checked;
-    void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, enabled: e.target.checked } } });
-    void syncCamera();
-  };
-  const [leftRow, rightRow] = $('#wave-rows').children;
-  leftRow.appendChild(actionPicker(state.config.extras.camera.left.action, action => {
-    state.config.extras.camera.left = { action };
-    void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, left: { action } } } });
-  }));
-  rightRow.appendChild(actionPicker(state.config.extras.camera.right.action, action => {
-    state.config.extras.camera.right = { action };
-    void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, right: { action } } } });
-  }));
-
-  if (!isTrained()) toast('Corners not taught yet — click "Teach corners" to start.');
-  $('#digest-btn').onclick = runDigest;
-  $('#draft-close').onclick = () => { $('#draft-box').hidden = true; draftTarget = null; };
-  $('#draft-send').onclick = sendDraft;
-  $('#draft-again').onclick = redraft;
-  $('#setup-btn').onclick = () => goto('power');
-  $('#rec-btn').onclick = toggleRecording;
-  $('#work-run').onclick = runAgent;
-  connectSlackFeed();
-  void refreshRecordings();
-  void refreshWork();
-  void refreshLinear();
 }
 
-/* ================= work (claude code sessions) ================= */
+function setupProgressLine(p: { step: string; line?: string; done?: boolean; error?: string }) {
+  const line = $(`.setup-row[data-step="${p.step}"] .line`);
+  if (!line) return;
+  line.hidden = false;
+  if (p.error) line.textContent = `failed: ${p.error}`;
+  else if (p.done) { line.textContent = 'done'; void refreshSetupStatus(); }
+  else if (p.line) line.textContent = p.line;
+}
+
+async function installEverything() {
+  const btn = $('#install-all');
+  btn.disabled = true; btn.textContent = 'Installing…';
+  const status = await refreshSetupStatus();
+  for (const r of SETUP_ROWS) {
+    if (status[r.key]) continue;
+    try {
+      const res = await fetch(`${SERVER}/setup/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step: r.step }),
+      });
+      if (!res.ok) break; // error line already shown via WS
+    } catch { break; }
+  }
+  await refreshSetupStatus();
+  btn.disabled = false; btn.textContent = 'Install everything';
+}
+
+async function connectSlackTokens() {
+  const appToken = $('#slack-app-token').value.trim();
+  const botToken = $('#slack-bot-token').value.trim();
+  const status = $('#slack-setup-status');
+  if (!appToken && !botToken) { status.textContent = 'Paste at least the xapp- token.'; return; }
+  status.textContent = 'Connecting…';
+  try {
+    const r = await fetch(`${SERVER}/setup/slack`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appToken: appToken || undefined, botToken: botToken || undefined }),
+    });
+    const data = await r.json();
+    status.textContent = data.connected ? 'Connected.' : 'Saved, but not connected — check tokens + Socket Mode.';
+  } catch {
+    status.textContent = 'Local server unreachable.';
+  }
+}
+
+async function connectLinearKey() {
+  const apiKey = $('#linear-key').value.trim();
+  const status = $('#linear-setup-status');
+  if (!apiKey) { status.textContent = 'Paste a lin_api_ key.'; return; }
+  status.textContent = 'Checking…';
+  try {
+    const r = await fetch(`${SERVER}/setup/linear`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    const data = await r.json();
+    status.textContent = data.connected ? `Connected — ${data.count} open issues.` : `Failed: ${data.error}`;
+  } catch {
+    status.textContent = 'Local server unreachable.';
+  }
+}
+
+/* ================= slack feed ================= */
+
+let slackWs: WebSocket | null = null;
+let slackRetry: ReturnType<typeof setTimeout> | null = null;
+
+interface SlackMsg {
+  channelName?: string | null; channel_name?: string | null; channel: string;
+  userName?: string | null; user_name?: string | null; user?: string | null;
+  slackTs?: string; slack_ts?: string; threadTs?: string | null; thread_ts?: string | null;
+  text: string;
+}
+
+let draftTarget: { channel: string; ts?: string; threadTs?: string | null } | null = null;
+
+function slackLine(m: SlackMsg) {
+  const log = $('#slack-log');
+  if (!log) return;
+  const chan = m.channelName ?? m.channel_name ?? m.channel;
+  const who = m.userName ?? m.user_name ?? m.user ?? '?';
+  const li = document.createElement('li');
+  li.textContent = `#${chan}  ${who}: ${m.text}`;
+  li.title = 'Click to draft a reply';
+  li.style.cursor = 'pointer';
+  li.onclick = () => openDraft(m);
+  log.prepend(li);
+  while (log.children.length > 25) log.lastChild!.remove();
+}
+
+async function openDraft(m: SlackMsg) {
+  const box = $('#draft-box');
+  const ts = m.slackTs ?? m.slack_ts;
+  draftTarget = { channel: m.channel, ts, threadTs: m.threadTs ?? m.thread_ts ?? ts };
+  box.hidden = false;
+  $('#draft-title').textContent = `Reply to ${m.userName ?? m.user_name ?? m.user ?? '?'}`;
+  $('#draft-text').value = 'drafting…';
+  await redraft();
+}
+
+async function redraft() {
+  if (!draftTarget) return;
+  try {
+    const r = await fetch(`${SERVER}/slack/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: draftTarget.channel, ts: draftTarget.ts }),
+    });
+    const data = await r.json();
+    $('#draft-text').value = r.ok ? data.draft : (data.error || 'draft failed');
+  } catch {
+    $('#draft-text').value = 'server offline';
+  }
+}
+
+async function sendDraft() {
+  if (!draftTarget) return;
+  const text = $('#draft-text').value.trim();
+  if (!text) return;
+  try {
+    const r = await fetch(`${SERVER}/slack/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: draftTarget.channel, text, threadTs: draftTarget.threadTs }),
+    });
+    const data = await r.json();
+    if (r.ok && data.ok) { toast('Sent.'); $('#draft-box').hidden = true; draftTarget = null; }
+    else toast(`Send failed: ${data.error || 'unknown'}`);
+  } catch {
+    toast('Send failed: server offline');
+  }
+}
+
+async function runDigest() {
+  const btn = $('#digest-btn');
+  const out = $('#digest-out');
+  btn.disabled = true; btn.textContent = 'Digesting…';
+  try {
+    const r = await fetch(`${SERVER}/slack/digest`, { method: 'POST' });
+    const data = await r.json();
+    out.hidden = false;
+    out.textContent = r.ok ? `${data.summary}\n\n(${data.count} messages)` : (data.error || 'digest failed');
+  } catch {
+    out.hidden = false;
+    out.textContent = 'server offline';
+  }
+  btn.disabled = false; btn.textContent = 'Digest';
+}
+
+function connectSlackFeed() {
+  const status = $('#slack-status');
+  if (slackRetry) clearTimeout(slackRetry);
+  fetch(`${SERVER}/slack/recent?limit=20`)
+    .then(r => r.json())
+    .then((rows: SlackMsg[]) => {
+      if (status) status.textContent = '';
+      const log = $('#slack-log');
+      if (log) log.innerHTML = '';
+      for (const m of rows.reverse()) slackLine(m);
+      openWs();
+    })
+    .catch(() => {
+      if (status) status.textContent = 'local server offline';
+      scheduleSlackRetry();
+    });
+}
+
+function scheduleSlackRetry() {
+  if (slackRetry) clearTimeout(slackRetry);
+  slackRetry = setTimeout(() => { if (state.page === 'slack') connectSlackFeed(); else openWs(); }, 30_000);
+}
+
+// One WebSocket for everything the server pushes; handlers are null-safe so
+// they no-op on pages that lack the target elements.
+function openWs() {
+  if (slackWs && slackWs.readyState <= WebSocket.OPEN) return;
+  slackWs = new WebSocket('ws://127.0.0.1:4817/ws');
+  slackWs.onmessage = e => {
+    const payload = JSON.parse(e.data);
+    if (payload.kind === 'slack-message') slackLine(payload.message);
+    if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
+    if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
+    if (payload.kind === 'setup-progress') setupProgressLine(payload);
+    if (payload.kind === 'recording') void onRecordingEvent(payload);
+    if (payload.kind === 'agent') {
+      if (payload.state !== 'running') toast(`Claude Code session #${payload.id}: ${payload.state}`);
+      void refreshWork();
+    }
+  };
+  slackWs.onclose = () => { slackWs = null; scheduleSlackRetry(); };
+}
+
+/* ================= calls ================= */
+
+interface RecordingRow {
+  id: number; started_at: string; ended_at: string | null;
+  transcript: string | null; summary: string | null; status: string;
+}
+
+function recBtnState(recording: boolean) {
+  const btn = $('#rec-btn');
+  if (btn) btn.textContent = recording ? '■ Stop' : '● Record';
+  $('#rec-dot').hidden = !recording;
+}
+
+async function toggleRecording() {
+  try {
+    const r = await fetch(`${SERVER}/record/toggle`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { toast(`Recording: ${data.error}`); return; }
+    recBtnState(data.state === 'recording');
+  } catch {
+    toast('Local server unreachable.');
+  }
+}
+
+async function refreshRecordings() {
+  try {
+    const health = await (await fetch(`${SERVER}/health`)).json();
+    recBtnState(Boolean(health.recording));
+    const rows: RecordingRow[] = await (await fetch(`${SERVER}/recordings?limit=10`)).json();
+    const list = $('#rec-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const rec of rows) {
+      const li = document.createElement('li');
+      li.className = 'rec-item';
+      const when = new Date(rec.started_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const label = rec.status === 'done'
+        ? (rec.summary ?? rec.transcript ?? '').split('\n')[0].slice(0, 90)
+        : rec.status;
+      li.textContent = `${when} · ${label}`;
+      if (rec.status === 'done') {
+        li.style.cursor = 'pointer';
+        li.title = 'Click for summary + transcript';
+        li.onclick = () => {
+          const open = li.querySelector('.rec-detail');
+          if (open) { open.remove(); return; }
+          const d = document.createElement('div');
+          d.className = 'rec-detail';
+          d.textContent = `${rec.summary ?? ''}\n\n— transcript —\n${rec.transcript ?? ''}`;
+          li.appendChild(d);
+        };
+      }
+      list.appendChild(li);
+    }
+  } catch { /* server offline */ }
+}
+
+async function onRecordingEvent(p: { state: string }) {
+  recBtnState(p.state === 'started');
+  const status = $('#rec-status');
+  if (status) status.textContent = p.state === 'transcribing' ? 'transcribing…' : '';
+  if (p.state === 'done' || p.state === 'error' || p.state === 'stopped') void refreshRecordings();
+}
+
+/* ================= work + linear ================= */
 
 interface AgentSession {
   id: number; cwd: string; prompt: string; status: string;
@@ -693,8 +1273,6 @@ async function runAgent() {
   }
 }
 
-/* ================= linear ================= */
-
 interface LinearIssueUi { identifier: string; title: string; state: string; url: string; description: string | null }
 
 async function refreshLinear() {
@@ -724,336 +1302,7 @@ async function refreshLinear() {
   } catch { /* server offline */ }
 }
 
-/* ================= calls (recording) ================= */
-
-interface RecordingRow {
-  id: number; started_at: string; ended_at: string | null;
-  transcript: string | null; summary: string | null; status: string;
-}
-
-function recBtnState(recording: boolean) {
-  const btn = $('#rec-btn');
-  if (btn) btn.textContent = recording ? '■ Stop' : '● Record';
-  $('#rec-dot').hidden = !recording;
-}
-
-async function toggleRecording() {
-  try {
-    const r = await fetch(`${SERVER}/record/toggle`, { method: 'POST' });
-    const data = await r.json();
-    if (!r.ok) { toast(`Recording: ${data.error}`); return; }
-    recBtnState(data.state === 'recording');
-  } catch {
-    toast('Local server unreachable.');
-  }
-}
-
-async function refreshRecordings() {
-  try {
-    const health = await (await fetch(`${SERVER}/health`)).json();
-    recBtnState(Boolean(health.recording));
-    const rows: RecordingRow[] = await (await fetch(`${SERVER}/recordings?limit=8`)).json();
-    const list = $('#rec-list');
-    if (!list) return;
-    list.innerHTML = '';
-    for (const rec of rows) {
-      const li = document.createElement('li');
-      li.className = 'rec-item';
-      const when = new Date(rec.started_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-      const label = rec.status === 'done'
-        ? (rec.summary ?? rec.transcript ?? '').split('\n')[0].slice(0, 90)
-        : rec.status;
-      li.textContent = `${when} · ${label}`;
-      if (rec.status === 'done') {
-        li.style.cursor = 'pointer';
-        li.title = 'Click for summary + transcript';
-        li.onclick = () => {
-          const open = li.querySelector('.rec-detail');
-          if (open) { open.remove(); return; }
-          const d = document.createElement('div');
-          d.className = 'rec-detail';
-          d.textContent = `${rec.summary ?? ''}\n\n— transcript —\n${rec.transcript ?? ''}`;
-          li.appendChild(d);
-        };
-      }
-      list.appendChild(li);
-    }
-  } catch { /* server offline — slack pane already shows it */ }
-}
-
-async function onRecordingEvent(p: { state: string }) {
-  recBtnState(p.state === 'started');
-  const status = $('#rec-status');
-  if (status) status.textContent = p.state === 'transcribing' ? 'transcribing…' : '';
-  if (p.state === 'done' || p.state === 'error' || p.state === 'stopped') void refreshRecordings();
-}
-
-/* ================= slack feed (local server) ================= */
-
-const SERVER = 'http://127.0.0.1:4817';
-let slackWs: WebSocket | null = null;
-let slackRetry: ReturnType<typeof setTimeout> | null = null;
-
-interface SlackMsg {
-  channelName?: string | null; channel_name?: string | null; channel: string;
-  userName?: string | null; user_name?: string | null; user?: string | null;
-  slackTs?: string; slack_ts?: string; threadTs?: string | null; thread_ts?: string | null;
-  text: string;
-}
-
-let draftTarget: { channel: string; ts?: string; threadTs?: string | null } | null = null;
-
-function slackLine(m: SlackMsg) {
-  const log = $('#slack-log');
-  if (!log) return;
-  const chan = m.channelName ?? m.channel_name ?? m.channel;
-  const who = m.userName ?? m.user_name ?? m.user ?? '?';
-  const li = document.createElement('li');
-  li.textContent = `#${chan}  ${who}: ${m.text}`;
-  li.title = 'Click to draft a reply';
-  li.style.cursor = 'pointer';
-  li.onclick = () => openDraft(m);
-  log.prepend(li);
-  while (log.children.length > 20) log.lastChild!.remove();
-}
-
-async function openDraft(m: SlackMsg) {
-  const box = $('#draft-box');
-  const ts = m.slackTs ?? m.slack_ts;
-  draftTarget = { channel: m.channel, ts, threadTs: m.threadTs ?? m.thread_ts ?? ts };
-  box.hidden = false;
-  $('#draft-title').textContent = `Reply to ${m.userName ?? m.user_name ?? m.user ?? '?'}`;
-  $('#draft-text').value = 'drafting…';
-  await redraft();
-}
-
-async function redraft() {
-  if (!draftTarget) return;
-  try {
-    const r = await fetch(`${SERVER}/slack/draft`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: draftTarget.channel, ts: draftTarget.ts }),
-    });
-    const data = await r.json();
-    $('#draft-text').value = r.ok ? data.draft : (data.error || 'draft failed');
-  } catch {
-    $('#draft-text').value = 'server offline';
-  }
-}
-
-async function sendDraft() {
-  if (!draftTarget) return;
-  const text = $('#draft-text').value.trim();
-  if (!text) return;
-  try {
-    const r = await fetch(`${SERVER}/slack/send`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: draftTarget.channel, text, threadTs: draftTarget.threadTs }),
-    });
-    const data = await r.json();
-    if (r.ok && data.ok) { toast('Sent.'); $('#draft-box').hidden = true; draftTarget = null; }
-    else toast(`Send failed: ${data.error || 'unknown'}`);
-  } catch {
-    toast('Send failed: server offline');
-  }
-}
-
-async function runDigest() {
-  const btn = $('#digest-btn');
-  const out = $('#digest-out');
-  btn.disabled = true; btn.textContent = 'Digesting…';
-  try {
-    const r = await fetch(`${SERVER}/slack/digest`, { method: 'POST' });
-    const data = await r.json();
-    out.hidden = false;
-    out.textContent = r.ok ? `${data.summary}\n\n(${data.count} messages)` : (data.error || 'digest failed');
-  } catch {
-    out.hidden = false;
-    out.textContent = 'server offline';
-  }
-  btn.disabled = false; btn.textContent = 'Digest';
-}
-
-function connectSlackFeed() {
-  const status = $('#slack-status');
-  if (slackRetry) clearTimeout(slackRetry);
-  fetch(`${SERVER}/slack/recent?limit=15`)
-    .then(r => r.json())
-    .then((rows: SlackMsg[]) => {
-      if (status) status.textContent = '';
-      const log = $('#slack-log');
-      if (log) log.innerHTML = '';
-      for (const m of rows.reverse()) slackLine(m);
-      openWs();
-    })
-    .catch(() => {
-      if (status) status.textContent = 'server offline — bun run server';
-      scheduleSlackRetry();
-    });
-}
-
-function scheduleSlackRetry() {
-  if (state.screen !== 'main') return;
-  if (slackRetry) clearTimeout(slackRetry);
-  slackRetry = setTimeout(connectSlackFeed, 30_000);
-}
-
-// One WebSocket for everything the server pushes; handlers are null-safe so
-// they no-op on screens that lack the target elements.
-function openWs() {
-  if (slackWs && slackWs.readyState <= WebSocket.OPEN) return;
-  slackWs = new WebSocket('ws://127.0.0.1:4817/ws');
-  slackWs.onmessage = e => {
-    const payload = JSON.parse(e.data);
-    if (payload.kind === 'slack-message') slackLine(payload.message);
-    if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
-    if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
-    if (payload.kind === 'setup-progress') setupProgressLine(payload);
-    if (payload.kind === 'recording') void onRecordingEvent(payload);
-    if (payload.kind === 'agent') {
-      if (payload.state !== 'running') toast(`Claude Code session #${payload.id}: ${payload.state}`);
-      void refreshWork();
-    }
-  };
-  slackWs.onclose = () => { slackWs = null; scheduleSlackRetry(); };
-}
-
-/* ================= power-ups (in-app setup) ================= */
-
-const SETUP_ROWS = [
-  { key: 'llamaCpp', step: 'llama.cpp', label: 'AI engine — llama.cpp' },
-  { key: 'whisperCpp', step: 'whisper-cpp', label: 'Speech engine — whisper.cpp' },
-  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model — whisper medium (1.5 GB)' },
-  { key: 'audiotap', step: 'audiotap', label: 'Call capture helper' },
-  { key: 'llmRunning', step: 'llm-start', label: 'Local AI on — Gemma 4 12B (7 GB, first time only)' },
-] as const;
-
-function renderPower() {
-  $('#screen').innerHTML = `
-    <div class="center-col" style="max-width: 640px;">
-      <div>
-        <div class="eyebrow">power-ups · all local, all optional</div>
-        <h1>Give it a brain.</h1>
-      </div>
-      <p class="lede">Everything below runs on this Mac. No cloud AI, nothing leaves your machine. Skip any of it — the desk buttons already work.</p>
-      <div class="setup-rows" id="setup-rows">
-        ${SETUP_ROWS.map(r => `
-          <div class="setup-row" data-step="${r.step}">
-            <span class="state todo">○</span>
-            <span>${r.label}</span>
-            <span class="line" hidden></span>
-          </div>`).join('')}
-      </div>
-      <button class="primary" id="install-all">Install everything</button>
-      <div class="setup-inputs">
-        <b>Slack (optional)</b>
-        <span class="lede" style="font-size:13px;">api.slack.com → your app → Socket Mode on. App-level token needs <code>connections:write</code>.</span>
-        <input id="slack-app-token" type="password" placeholder="xapp-… app-level token" />
-        <input id="slack-bot-token" type="password" placeholder="xoxb-… bot token" />
-        <button class="secondary" id="slack-connect">Connect Slack</button>
-        <span id="slack-setup-status" class="lede" style="font-size:13px;"></span>
-      </div>
-      <div class="setup-inputs">
-        <b>Linear (optional)</b>
-        <span class="lede" style="font-size:13px;">Personal API key from linear.app → Settings → API. Shows your issues, one click sends them to Claude Code.</span>
-        <input id="linear-key" type="password" placeholder="lin_api_…" />
-        <button class="secondary" id="linear-connect">Connect Linear</button>
-        <span id="linear-setup-status" class="lede" style="font-size:13px;"></span>
-      </div>
-      <p class="lede" style="font-size:12.5px;">Call recording asks for Screen Recording + Microphone permission on first use. A notification fires whenever recording starts — tell the people on the call.</p>
-      <button class="secondary" id="power-done">Done</button>
-    </div>`;
-  void refreshSetupStatus();
-  $('#install-all').onclick = installEverything;
-  $('#slack-connect').onclick = connectSlackTokens;
-  $('#linear-connect').onclick = connectLinearKey;
-  $('#power-done').onclick = () => goto('main');
-  openWs();
-}
-
-async function connectLinearKey() {
-  const apiKey = $('#linear-key').value.trim();
-  const status = $('#linear-setup-status');
-  if (!apiKey) { status.textContent = 'Paste a lin_api_ key.'; return; }
-  status.textContent = 'Checking…';
-  try {
-    const r = await fetch(`${SERVER}/setup/linear`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
-    });
-    const data = await r.json();
-    status.textContent = data.connected ? `Connected — ${data.count} open issues.` : `Failed: ${data.error}`;
-  } catch {
-    status.textContent = 'Local server unreachable.';
-  }
-}
-
-async function refreshSetupStatus(): Promise<Record<string, boolean>> {
-  try {
-    const s = await (await fetch(`${SERVER}/setup/status`)).json();
-    for (const r of SETUP_ROWS) {
-      const el = $(`.setup-row[data-step="${r.step}"] .state`);
-      if (!el) continue;
-      el.textContent = s[r.key] ? '✓' : '○';
-      el.className = `state ${s[r.key] ? 'ok' : 'todo'}`;
-    }
-    const slackStatus = $('#slack-setup-status');
-    if (slackStatus) {
-      slackStatus.textContent = s.slackConnected ? 'Connected.' :
-        s.slackConfigured ? 'Tokens saved, not connected — check Socket Mode is enabled.' : '';
-    }
-    return s;
-  } catch {
-    const rows = $('#setup-rows');
-    if (rows) rows.insertAdjacentHTML('beforebegin', '<p class="lede">Local server starting… try again in a few seconds.</p>');
-    return {};
-  }
-}
-
-function setupProgressLine(p: { step: string; line?: string; done?: boolean; error?: string }) {
-  const line = $(`.setup-row[data-step="${p.step}"] .line`);
-  if (!line) return;
-  line.hidden = false;
-  if (p.error) line.textContent = `failed: ${p.error}`;
-  else if (p.done) { line.textContent = 'done'; void refreshSetupStatus(); }
-  else if (p.line) line.textContent = p.line;
-}
-
-async function installEverything() {
-  const btn = $('#install-all');
-  btn.disabled = true; btn.textContent = 'Installing…';
-  const status = await refreshSetupStatus();
-  for (const r of SETUP_ROWS) {
-    if (status[r.key]) continue;
-    try {
-      const res = await fetch(`${SERVER}/setup/run`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ step: r.step }),
-      });
-      if (!res.ok) break; // error line already shown via WS
-    } catch { break; }
-  }
-  await refreshSetupStatus();
-  btn.disabled = false; btn.textContent = 'Install everything';
-}
-
-async function connectSlackTokens() {
-  const appToken = $('#slack-app-token').value.trim();
-  const botToken = $('#slack-bot-token').value.trim();
-  const status = $('#slack-setup-status');
-  if (!appToken && !botToken) { status.textContent = 'Paste at least the xapp- token.'; return; }
-  status.textContent = 'Connecting…';
-  try {
-    const r = await fetch(`${SERVER}/setup/slack`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appToken: appToken || undefined, botToken: botToken || undefined }),
-    });
-    const data = await r.json();
-    status.textContent = data.connected ? 'Connected.' : 'Saved, but not connected — check tokens + Socket Mode.';
-  } catch {
-    status.textContent = 'Local server unreachable.';
-  }
-}
+/* ================= pickers + corner editor ================= */
 
 function isTrained(): boolean {
   const counts = state.classifier.counts();
@@ -1076,8 +1325,6 @@ function updateCornerFace(zoneId: ZoneId) {
   el.textContent = parts.length ? parts.join('  ·  ') : 'Not set — click to assign';
   el.classList.toggle('unset', !parts.length);
 }
-
-/* ================= action picker + corner editor ================= */
 
 // Small self-saving control: [type ▾] [preset ▾ | value input]
 function actionPicker(current: Action | null | undefined, onChange: (a: Action | null) => void): HTMLElement {
@@ -1201,14 +1448,16 @@ function litCorner(zoneId: string) {
 }
 
 function logLine(text: string, hit = false) {
+  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  state.activity.unshift({ time, text, hit });
+  if (state.activity.length > 100) state.activity.pop();
   const log = $('#log');
   if (!log) return;
   const li = document.createElement('li');
-  const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   li.textContent = `${time}  ${text}`;
   if (hit) li.className = 'hit';
   log.prepend(li);
-  while (log.children.length > 40) log.lastChild!.remove();
+  while (log.children.length > 100) log.lastChild!.remove();
 }
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null;
