@@ -58,3 +58,53 @@ export interface AppConfig {
   extras: ExtrasConfig;
   classifier: ClassifierJSON | null;
 }
+
+/* ================= integrations ================= */
+
+/** One input the user fills to connect an integration. `key` is the kv key. */
+export interface ConnectField {
+  key: string;
+  label: string;
+  placeholder: string;
+  secret: boolean;
+  help?: string;
+}
+
+export interface IntegrationStatus {
+  connected: boolean;
+  detail?: string;
+}
+
+export interface IntegrationKv {
+  get(key: string): string | null;
+  set(key: string, value: string): void;
+  del(key: string): void;
+}
+
+/**
+ * Capabilities the server hands to an integration. `db` is a bun:sqlite
+ * Database and `llm()` resolves to a ready @assemble/llm Llm (or null when
+ * AI is off) — typed unknown here so core stays dependency-free.
+ */
+export interface IntegrationContext {
+  kv: IntegrationKv;
+  db: unknown;
+  broadcast(payload: unknown): void;
+  llm(): Promise<unknown | null>;
+  notify(title: string, body: string): void;
+}
+
+export interface IntegrationManifest {
+  id: string;
+  name: string;
+  description: string;
+  /** Inline SVG markup for the sidebar/catalog icon. */
+  icon: string;
+  connectFields: ConnectField[];
+  status(ctx: IntegrationContext): Promise<IntegrationStatus>;
+  /** Called on connect and on boot. Must throw if required fields are missing. */
+  start(ctx: IntegrationContext): Promise<void>;
+  stop(): Promise<void>;
+  /** Returns a Hono sub-app; the server mounts it at /integrations/<id>. */
+  routes(ctx: IntegrationContext): unknown;
+}

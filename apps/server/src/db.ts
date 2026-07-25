@@ -162,3 +162,7 @@ export function kvGet(db: Database, key: string): string | null {
 export function kvSet(db: Database, key: string, value: string): void {
   db.run(`INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`, [key, value]);
 }
+
+export function kvDel(db: Database, key: string): void {
+  db.run(`DELETE FROM kv WHERE key = ?`, [key]);
+}
