@@ -41,7 +41,7 @@ const state = {
   rhythm: new RhythmMatcher(),
   rhythmTimer: null as ReturnType<typeof setTimeout> | null,
   lastConfidence: 1,
-  screen: 'loading' as 'loading' | 'welcome' | 'mic' | 'teach' | 'main',
+  screen: 'loading' as 'loading' | 'welcome' | 'mic' | 'teach' | 'power' | 'main',
   teach: null as TeachState | null,
   micError: null as string | null,
 };
@@ -50,6 +50,7 @@ const PRESET_NAMES: Record<string, string> = {
   'volume-up': 'Volume up', 'volume-down': 'Volume down', 'mute-toggle': 'Mute toggle',
   'lock-screen': 'Lock screen', 'screenshot': 'Screenshot to clipboard',
   'screenshot-region': 'Screenshot region to clipboard', 'display-sleep': 'Sleep the display',
+  'record-toggle': 'Record call (start/stop)',
 };
 const TYPE_NAMES: Record<string, string> = { shell: 'Run', keystroke: 'Press', open: 'Open', system: '' };
 
@@ -198,9 +199,9 @@ function firePattern({ zone, count }: RhythmPattern) {
 
 /* ================= navigation ================= */
 
-function goto(screen: 'welcome' | 'mic' | 'teach' | 'main') {
+function goto(screen: 'welcome' | 'mic' | 'teach' | 'power' | 'main') {
   state.screen = screen;
-  ({ welcome: renderWelcome, mic: renderMic, teach: renderTeach, main: renderMain })[screen]();
+  ({ welcome: renderWelcome, mic: renderMic, teach: renderTeach, power: renderPower, main: renderMain })[screen]();
   $('#armed-wrap').hidden = screen !== 'main';
   setStatus();
   void syncCamera();
@@ -380,11 +381,12 @@ function teachCollect(vec: Float64Array) {
 async function finishTeach() {
   const teach = state.teach!;
   if (teach.timer) clearInterval(teach.timer);
+  const firstRun = !state.config.onboarded;
   state.config.classifier = state.classifier.toJSON();
   state.config.onboarded = true;
   await window.assemble.setConfig({ classifier: state.config.classifier, onboarded: true });
-  goto('main');
-  toast('Ready. Click a corner to choose what it does.');
+  goto(firstRun ? 'power' : 'main');
+  if (!firstRun) toast('Ready. Click a corner to choose what it does.');
 }
 
 function cancelTeach() {
@@ -414,6 +416,7 @@ function renderMain() {
         <label>Microphone <select id="device"></select></label>
         <label title="Left detects softer taps">Sensitivity <input type="range" id="sensitivity" min="3" max="15" step="0.5" /></label>
         <span class="spacer"></span>
+        <button class="secondary" id="setup-btn">Setup</button>
         <button class="secondary" id="reteach">${isTrained() ? 'Re-teach corners' : 'Teach corners'}</button>
       </div>
       <section class="extras">
@@ -449,6 +452,13 @@ function renderMain() {
             <button class="secondary" id="draft-again">Redraft</button>
           </div>
         </div>
+      </div>
+      <div class="activity">
+        <h2>Calls
+          <button class="ghost" id="rec-btn">● Record</button>
+          <span id="rec-status" class="pane-status"></span>
+        </h2>
+        <ul id="rec-list"></ul>
       </div>
       <div class="activity">
         <h2>Activity</h2>
@@ -506,7 +516,74 @@ function renderMain() {
   $('#draft-close').onclick = () => { $('#draft-box').hidden = true; draftTarget = null; };
   $('#draft-send').onclick = sendDraft;
   $('#draft-again').onclick = redraft;
+  $('#setup-btn').onclick = () => goto('power');
+  $('#rec-btn').onclick = toggleRecording;
   connectSlackFeed();
+  void refreshRecordings();
+}
+
+/* ================= calls (recording) ================= */
+
+interface RecordingRow {
+  id: number; started_at: string; ended_at: string | null;
+  transcript: string | null; summary: string | null; status: string;
+}
+
+function recBtnState(recording: boolean) {
+  const btn = $('#rec-btn');
+  if (btn) btn.textContent = recording ? '■ Stop' : '● Record';
+  $('#rec-dot').hidden = !recording;
+}
+
+async function toggleRecording() {
+  try {
+    const r = await fetch(`${SERVER}/record/toggle`, { method: 'POST' });
+    const data = await r.json();
+    if (!r.ok) { toast(`Recording: ${data.error}`); return; }
+    recBtnState(data.state === 'recording');
+  } catch {
+    toast('Local server unreachable.');
+  }
+}
+
+async function refreshRecordings() {
+  try {
+    const health = await (await fetch(`${SERVER}/health`)).json();
+    recBtnState(Boolean(health.recording));
+    const rows: RecordingRow[] = await (await fetch(`${SERVER}/recordings?limit=8`)).json();
+    const list = $('#rec-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const rec of rows) {
+      const li = document.createElement('li');
+      li.className = 'rec-item';
+      const when = new Date(rec.started_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      const label = rec.status === 'done'
+        ? (rec.summary ?? rec.transcript ?? '').split('\n')[0].slice(0, 90)
+        : rec.status;
+      li.textContent = `${when} · ${label}`;
+      if (rec.status === 'done') {
+        li.style.cursor = 'pointer';
+        li.title = 'Click for summary + transcript';
+        li.onclick = () => {
+          const open = li.querySelector('.rec-detail');
+          if (open) { open.remove(); return; }
+          const d = document.createElement('div');
+          d.className = 'rec-detail';
+          d.textContent = `${rec.summary ?? ''}\n\n— transcript —\n${rec.transcript ?? ''}`;
+          li.appendChild(d);
+        };
+      }
+      list.appendChild(li);
+    }
+  } catch { /* server offline — slack pane already shows it */ }
+}
+
+async function onRecordingEvent(p: { state: string }) {
+  recBtnState(p.state === 'started');
+  const status = $('#rec-status');
+  if (status) status.textContent = p.state === 'transcribing' ? 'transcribing…' : '';
+  if (p.state === 'done' || p.state === 'error' || p.state === 'stopped') void refreshRecordings();
 }
 
 /* ================= slack feed (local server) ================= */
@@ -605,14 +682,7 @@ function connectSlackFeed() {
       const log = $('#slack-log');
       if (log) log.innerHTML = '';
       for (const m of rows.reverse()) slackLine(m);
-      if (slackWs) slackWs.close();
-      slackWs = new WebSocket(`ws://127.0.0.1:4817/ws`);
-      slackWs.onmessage = e => {
-        const payload = JSON.parse(e.data);
-        if (payload.kind === 'slack-message') slackLine(payload.message);
-        if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
-      };
-      slackWs.onclose = () => scheduleSlackRetry();
+      openWs();
     })
     .catch(() => {
       if (status) status.textContent = 'server offline — bun run server';
@@ -624,6 +694,134 @@ function scheduleSlackRetry() {
   if (state.screen !== 'main') return;
   if (slackRetry) clearTimeout(slackRetry);
   slackRetry = setTimeout(connectSlackFeed, 30_000);
+}
+
+// One WebSocket for everything the server pushes; handlers are null-safe so
+// they no-op on screens that lack the target elements.
+function openWs() {
+  if (slackWs && slackWs.readyState <= WebSocket.OPEN) return;
+  slackWs = new WebSocket('ws://127.0.0.1:4817/ws');
+  slackWs.onmessage = e => {
+    const payload = JSON.parse(e.data);
+    if (payload.kind === 'slack-message') slackLine(payload.message);
+    if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
+    if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
+    if (payload.kind === 'setup-progress') setupProgressLine(payload);
+    if (payload.kind === 'recording') void onRecordingEvent(payload);
+  };
+  slackWs.onclose = () => { slackWs = null; scheduleSlackRetry(); };
+}
+
+/* ================= power-ups (in-app setup) ================= */
+
+const SETUP_ROWS = [
+  { key: 'llamaCpp', step: 'llama.cpp', label: 'AI engine — llama.cpp' },
+  { key: 'whisperCpp', step: 'whisper-cpp', label: 'Speech engine — whisper.cpp' },
+  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model — whisper medium (1.5 GB)' },
+  { key: 'audiotap', step: 'audiotap', label: 'Call capture helper' },
+  { key: 'llmRunning', step: 'llm-start', label: 'Local AI on — Gemma 4 12B (7 GB, first time only)' },
+] as const;
+
+function renderPower() {
+  $('#screen').innerHTML = `
+    <div class="center-col" style="max-width: 640px;">
+      <div>
+        <div class="eyebrow">power-ups · all local, all optional</div>
+        <h1>Give it a brain.</h1>
+      </div>
+      <p class="lede">Everything below runs on this Mac. No cloud AI, nothing leaves your machine. Skip any of it — the desk buttons already work.</p>
+      <div class="setup-rows" id="setup-rows">
+        ${SETUP_ROWS.map(r => `
+          <div class="setup-row" data-step="${r.step}">
+            <span class="state todo">○</span>
+            <span>${r.label}</span>
+            <span class="line" hidden></span>
+          </div>`).join('')}
+      </div>
+      <button class="primary" id="install-all">Install everything</button>
+      <div class="setup-inputs">
+        <b>Slack (optional)</b>
+        <span class="lede" style="font-size:13px;">api.slack.com → your app → Socket Mode on. App-level token needs <code>connections:write</code>.</span>
+        <input id="slack-app-token" type="password" placeholder="xapp-… app-level token" />
+        <input id="slack-bot-token" type="password" placeholder="xoxb-… bot token" />
+        <button class="secondary" id="slack-connect">Connect Slack</button>
+        <span id="slack-setup-status" class="lede" style="font-size:13px;"></span>
+      </div>
+      <p class="lede" style="font-size:12.5px;">Call recording asks for Screen Recording + Microphone permission on first use. A notification fires whenever recording starts — tell the people on the call.</p>
+      <button class="secondary" id="power-done">Done</button>
+    </div>`;
+  void refreshSetupStatus();
+  $('#install-all').onclick = installEverything;
+  $('#slack-connect').onclick = connectSlackTokens;
+  $('#power-done').onclick = () => goto('main');
+  openWs();
+}
+
+async function refreshSetupStatus(): Promise<Record<string, boolean>> {
+  try {
+    const s = await (await fetch(`${SERVER}/setup/status`)).json();
+    for (const r of SETUP_ROWS) {
+      const el = $(`.setup-row[data-step="${r.step}"] .state`);
+      if (!el) continue;
+      el.textContent = s[r.key] ? '✓' : '○';
+      el.className = `state ${s[r.key] ? 'ok' : 'todo'}`;
+    }
+    const slackStatus = $('#slack-setup-status');
+    if (slackStatus) {
+      slackStatus.textContent = s.slackConnected ? 'Connected.' :
+        s.slackConfigured ? 'Tokens saved, not connected — check Socket Mode is enabled.' : '';
+    }
+    return s;
+  } catch {
+    const rows = $('#setup-rows');
+    if (rows) rows.insertAdjacentHTML('beforebegin', '<p class="lede">Local server starting… try again in a few seconds.</p>');
+    return {};
+  }
+}
+
+function setupProgressLine(p: { step: string; line?: string; done?: boolean; error?: string }) {
+  const line = $(`.setup-row[data-step="${p.step}"] .line`);
+  if (!line) return;
+  line.hidden = false;
+  if (p.error) line.textContent = `failed: ${p.error}`;
+  else if (p.done) { line.textContent = 'done'; void refreshSetupStatus(); }
+  else if (p.line) line.textContent = p.line;
+}
+
+async function installEverything() {
+  const btn = $('#install-all');
+  btn.disabled = true; btn.textContent = 'Installing…';
+  const status = await refreshSetupStatus();
+  for (const r of SETUP_ROWS) {
+    if (status[r.key]) continue;
+    try {
+      const res = await fetch(`${SERVER}/setup/run`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ step: r.step }),
+      });
+      if (!res.ok) break; // error line already shown via WS
+    } catch { break; }
+  }
+  await refreshSetupStatus();
+  btn.disabled = false; btn.textContent = 'Install everything';
+}
+
+async function connectSlackTokens() {
+  const appToken = $('#slack-app-token').value.trim();
+  const botToken = $('#slack-bot-token').value.trim();
+  const status = $('#slack-setup-status');
+  if (!appToken && !botToken) { status.textContent = 'Paste at least the xapp- token.'; return; }
+  status.textContent = 'Connecting…';
+  try {
+    const r = await fetch(`${SERVER}/setup/slack`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appToken: appToken || undefined, botToken: botToken || undefined }),
+    });
+    const data = await r.json();
+    status.textContent = data.connected ? 'Connected.' : 'Saved, but not connected — check tokens + Socket Mode.';
+  } catch {
+    status.textContent = 'Local server unreachable.';
+  }
 }
 
 function isTrained(): boolean {

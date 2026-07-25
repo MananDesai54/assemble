@@ -23,6 +23,7 @@ export const SYSTEM_PRESETS: Record<string, string> = {
   'screenshot':  `screencapture -x -c`,
   'screenshot-region': `screencapture -i -c`,
   'display-sleep': `pmset displaysleepnow`,
+  'record-toggle': `curl -s -X POST http://127.0.0.1:4817/record/toggle`,
 };
 
 function keystrokeCommand(value: string): string {

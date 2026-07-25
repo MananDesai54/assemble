@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Llm, scoreUrgency, digestMessages, draftReply } from '../src/index';
+import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall } from '../src/index';
 
 function fakeLlm(reply: string, calls: any[] = []) {
   const fetchFn = async (url: string, init?: any) => {
@@ -60,6 +60,22 @@ describe('digestMessages', () => {
     const { llm } = fakeLlm('should not be called', calls);
     const out = await digestMessages(llm, []);
     expect(out).toBe('Nothing new.');
+    expect(calls.length).toBe(0);
+  });
+});
+
+describe('summarizeCall', () => {
+  it('summarizes transcript', async () => {
+    const { llm, calls } = fakeLlm('Gist: standup.', []);
+    const out = await summarizeCall(llm, 'we discussed the launch');
+    expect(out).toBe('Gist: standup.');
+    expect(JSON.stringify(calls[0].body)).toContain('we discussed the launch');
+  });
+
+  it('empty transcript short-circuits', async () => {
+    const calls: any[] = [];
+    const { llm } = fakeLlm('x', calls);
+    expect(await summarizeCall(llm, '   ')).toBe('Empty recording.');
     expect(calls.length).toBe(0);
   });
 });

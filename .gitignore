@@ -4,3 +4,4 @@ models/
 *.log
 .env
 data/
+native/audiotap/audiotap

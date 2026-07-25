@@ -25,13 +25,15 @@ One mic can't triangulate, but each desk corner *sounds different* at the mic �
 ```bash
 git clone https://github.com/MananDesai54/assemble.git
 cd assemble
-npm install
-npm start
+bun install
+bun start
 ```
 
-Requires macOS. First launch asks for microphone access — allow it.
+Requires macOS + [Bun](https://bun.sh). That's the whole setup — the app starts its own
+local server and walks you through everything else (mic, teaching, AI engines, Slack)
+in the onboarding.
 
-If macOS claims "Electron.app contains malware": XProtect false-positive on stale Electron dev builds. `npm install --save-dev electron@latest`, then `node node_modules/electron/install.js`.
+If macOS claims "Electron.app contains malware": XProtect false-positive on stale Electron dev builds. Reinstall electron and rerun.
 
 ## Usage guide
 
@@ -120,24 +122,39 @@ bun start             # build + launch desktop app
 bun run server        # local daemon (Slack + AI endpoints)
 ```
 
-### Local AI (no cloud, ever)
+### Power-ups (in-app setup, all local)
 
-```bash
-scripts/setup-models.sh   # brew: llama.cpp + whisper.cpp; downloads whisper medium (~1.5 GB)
-scripts/start-llm.sh      # Gemma 4 12B Q4_K_M via llama-server on :4820 (first run downloads ~7 GB)
-```
+Onboarding ends on the **Power-ups** screen (later: Setup button on the main screen).
+One click installs everything, with live progress:
 
-With the server + LLM running:
+- llama.cpp + whisper.cpp (via Homebrew)
+- whisper medium model (1.5 GB) — speech-to-text
+- call capture helper (compiled locally)
+- **Gemma 4 12B** via llama-server (7 GB, first time only) — the local brain
 
-- **Urgent pings** — every captured Slack message is triaged by Gemma locally; genuinely urgent ones raise a macOS notification.
+No cloud AI, ever. Everything runs on this Mac. With the brain on:
+
+- **Urgent pings** — every captured Slack message is triaged locally; genuinely urgent ones raise a macOS notification.
 - **Digest** — button in the Slack pane summarizes everything since your last digest.
-- **Draft replies** — click any message in the pane → local draft appears → edit → "Send to Slack". Nothing sends without your click.
+- **Draft replies** — click any message → local draft → edit → "Send to Slack". Nothing sends without your click.
 
-### Slack setup
+### Slack
 
-Socket Mode (no public URL): enable Socket Mode on your Slack app, create an app-level
-token with `connections:write`, put it in `.env` as `SLACK_APP_TOKEN` alongside
-`SLACK_BOT_TOKEN`. Bot must be invited to channels you want captured.
+Paste your tokens straight into the Power-ups screen (`xapp-…` app token with
+`connections:write` + `xoxb-…` bot token; Socket Mode enabled on the app — no public
+URL needed). Bot must be invited to channels you want captured. `.env` values work as
+a fallback for headless runs.
+
+### Call recording
+
+**● Record** in the Calls pane — or assign the "Record call (start/stop)" preset to any
+gesture (double-knock a corner, blow at the mic…). Captures both sides: your mic +
+system audio (ScreenCaptureKit; Screen Recording permission prompted on first use).
+On stop: whisper transcribes, Gemma summarizes with action items, everything lands in
+the Calls pane and stays on disk in `data/recordings/`.
+
+A macOS notification fires whenever recording starts, and **● REC** shows in the app —
+recording other people without telling them is illegal in many places. Tell your call.
 
 Config lives at `~/Library/Application Support/assemble/config.json` — delete it for a factory reset.
 

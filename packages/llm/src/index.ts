@@ -90,6 +90,16 @@ export async function digestMessages(llm: Llm, messages: MessageLike[]): Promise
   ], { maxTokens: 400, temperature: 0.3 })).trim();
 }
 
+export async function summarizeCall(llm: Llm, transcript: string): Promise<string> {
+  if (!transcript.trim()) return 'Empty recording.';
+  return (await llm.chat([
+    { role: 'system', content:
+      'Summarize this call transcript for the participant. Structure: one-line gist, ' +
+      'key points (bullets), decisions, action items with owners if mentioned. Plain text, concise.' },
+    { role: 'user', content: transcript.slice(0, 24_000) },
+  ], { maxTokens: 600, temperature: 0.3 })).trim();
+}
+
 export async function draftReply(
   llm: Llm,
   context: MessageLike[],

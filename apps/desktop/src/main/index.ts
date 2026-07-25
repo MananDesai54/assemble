@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { executeAction } from '@assemble/actions';
 import type { Action, AppConfig } from '@assemble/core';
@@ -11,6 +14,22 @@ let win: BrowserWindow;
 let trayHandle: ReturnType<typeof createTray>;
 let store: ConfigStore;
 let quitting = false;
+let serverProc: ChildProcess | null = null;
+
+// The desktop app owns the local daemon: start it if nothing answers on :4817.
+async function ensureServer() {
+  try {
+    await fetch('http://127.0.0.1:4817/health', { signal: AbortSignal.timeout(1000) });
+    return; // already running (user-managed or previous instance)
+  } catch { /* not running — spawn */ }
+  const repoRoot = join(__dirname, '..', '..', '..'); // apps/desktop/dist → repo root
+  const bunCandidates = [join(homedir(), '.bun/bin/bun'), '/opt/homebrew/bin/bun', 'bun'];
+  const bun = bunCandidates.find(p => p === 'bun' || existsSync(p)) ?? 'bun';
+  serverProc = spawn(bun, ['run', 'apps/server/src/index.ts'], {
+    cwd: repoRoot, stdio: 'ignore',
+  });
+  serverProc.on('exit', () => { serverProc = null; });
+}
 
 function createWindow() {
   win = new BrowserWindow({
@@ -30,6 +49,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   store = new ConfigStore(join(app.getPath('userData'), 'config.json'));
+  void ensureServer();
   createWindow();
 
   const setArmed = (v: boolean) => {
@@ -76,3 +96,4 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {}); // tray app: stay alive
+app.on('before-quit', () => { serverProc?.kill('SIGTERM'); });
