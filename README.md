@@ -141,10 +141,10 @@ apps/server       local daemon :4817 — Slack intake, SQLite, AI endpoints
 packages/core     shared types + zone model
 packages/dsp      pure audio DSP — no Electron dependency, tested in Node
 packages/actions  action model + macOS executor
-packages/llm      llama-server client + prompts (urgency, digest, drafts)
+packages/llm      llama-server client + prompts (call summaries, voice intents)
 packages/stt      whisper.cpp wrapper (local speech-to-text)
 packages/integrations       pluggable third-party connectors — hidden until connected
-packages/integrations/slack   user-token polling intake, digests, drafts + manifest
+packages/integrations/slack   user-token polling intake (listen-only) + manifest
 packages/integrations/linear  assigned issues + manifest
 ```
 
@@ -170,11 +170,9 @@ with one click and live progress:
 - your chosen **brain** via llama-server — Gemma 4 E4B (light, 8 GB RAM) / **Gemma 4 12B** (recommended, strong multilingual) / Gemma 4 26B-A4B (big MoE, 24 GB+) / gpt-oss-20b (OpenAI open-weight, English-first)
 
 Both dropdowns show download size, RAM needs, and strengths; switching the brain
-hot-restarts llama-server. Local by default — with the brain on:
-
-- **Urgent pings** — every captured Slack message is triaged locally; genuinely urgent ones raise a macOS notification.
-- **Digest** — button on the Slack page summarizes everything since your last digest.
-- **Draft replies** — click any message → local draft → edit → "Send to Slack". Nothing sends without your click.
+hot-restarts llama-server. Local by default — the brain powers call summaries and
+voice-command intents. Slack messages are deliberately **LLM-free** for now: they
+are captured and stored, nothing more.
 
 ### Bring your own key (optional)
 
@@ -187,13 +185,12 @@ and drafts are sent to that provider.
 ### Slack
 
 Paste your **user token** (`xoxp-…`, api.slack.com → your app → OAuth & Permissions →
-User OAuth Token) into onboarding's **Connect** step or Settings → Integrations. It reads
-what *you* can read — every channel and DM you're in, no bot invites, no Socket Mode, no
-public URL. On connect, recent history is backfilled locally; new messages arrive by
-polling (~45 s). DMs need the `im:read` user scope on your app — without it they're
-skipped automatically. Drafted replies post as you. `.env` (`SLACK_USER_TOKEN`) works as
-a fallback for headless runs. The catalog shows each service; sidebar entries appear only
-when connected.
+User OAuth Token) into onboarding's **Connect** step or Settings → Integrations. It listens
+to what *you* can read — every channel and DM you're in, no bot invites, no Socket Mode, no
+public URL. **New messages only** (polled ~45 s) — no history is fetched, no AI touches
+them; they land in the local database and the live feed on the Workflows page. DMs need
+the `im:read` user scope on your app — without it they're skipped automatically.
+`.env` (`SLACK_USER_TOKEN`) works as a fallback for headless runs.
 
 ### Voice commands
 
@@ -201,19 +198,20 @@ Press and release **Cmd+Shift** alone, anywhere (listen-only key tap — real sh
 any gesture: triple-knock a corner, blow at the mic, wave. Speak; it stops on silence.
 whisper transcribes locally, Gemma maps it to a closed set of safe intents:
 
-> "what did I miss on slack" → digest · "record this call" → recording ·
-> "take a screenshot" · "volume up" · "mute" · "lock screen" · "open github.com" · "open Spotify"
+> "record this call" → recording · "take a screenshot" · "volume up" · "mute" ·
+> "lock screen" · "open github.com" · "open Spotify"
 
 Deliberately **no arbitrary shell from voice** — a misheard sentence must never execute
 a command you didn't choose. Unknown requests are ignored and shown as "no match".
 
-### Work — Linear + Claude Code
+### Workflows — Claude Code
 
-Connect Linear in Settings → Integrations (personal API key) and your open issues appear in the **Linear**
-pane. Click one → it prefills a **Claude Code** session; pick the working directory
-(recent dirs remembered, e.g. `~/midgard/api`), hit Run. The Linear pane appears only when Linear is connected. Sessions run headless
-(`claude -p`), show live status, and store their output — click a session to read it,
-stop it mid-run if needed. Up to 3 concurrent.
+The **Workflows** page runs **Claude Code** sessions in any repo: pick the working
+directory (recent dirs remembered, e.g. `~/midgard/api`), write the prompt, hit Run.
+Sessions run headless (`claude -p`), show live status, and store their output — click
+a session to read it, stop it mid-run if needed. Up to 3 concurrent. When Slack is
+connected, its live message feed shows here too. Linear connects in Settings →
+Integrations but is intentionally inert for now — the key is stored, nothing is fetched.
 
 Permission model: sessions default to `acceptEdits` (Claude can edit files in that repo
 but not run arbitrary commands). The "Skip permission prompts" toggle hands the session

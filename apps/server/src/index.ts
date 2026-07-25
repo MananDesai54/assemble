@@ -11,7 +11,6 @@ import {
   openDb, kvGet, kvSet, kvDel,
   insertRecording, updateRecording, listRecordings, getRecording,
 } from './db';
-import { runDigest } from '@assemble/integration-slack';
 import { registry, listIntegrations, connectIntegration, disconnectIntegration, startConfigured, stopAll } from './integrations';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
 import { existsSync, rmSync } from 'node:fs';
@@ -330,12 +329,9 @@ app.post('/voice', async c => {
   let result: string | null = null;
   try {
     switch (intent.kind) {
-      case 'digest': {
-        const d = await runDigest(ctx);
-        notifyMac('Slack digest', d.summary.slice(0, 180));
-        result = d.summary;
+      case 'digest':
+        result = 'digests are off for now'; // chat stays LLM-free by design
         break;
-      }
       case 'record-toggle': {
         if (recorder.active) {
           const rec = await recorder.stop();

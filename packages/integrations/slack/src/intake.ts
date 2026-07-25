@@ -13,10 +13,8 @@ export interface NormalizedMessage {
 export interface EnrichedMessage extends NormalizedMessage {
   userName: string | null;
   channelName: string | null;
-  /** Message written by the token's owner — callers skip urgency pings for these. */
+  /** Message written by the token's owner. */
   isSelf?: boolean;
-  /** False during the initial backfill sweep — callers skip pings/broadcasts for history. */
-  live?: boolean;
 }
 
 // Pure: one conversations.history entry → normalized message, or null for
@@ -85,9 +83,10 @@ async function listConversations(web: WebClient): Promise<Convo[]> {
 }
 
 /**
- * Poll-based intake on a user token (xoxp): reads every conversation the
+ * Poll-based intake on a user token (xoxp): watches every conversation the
  * user is a member of — no bot invites, no Socket Mode, no public URL.
- * First sweep backfills history; later sweeps fetch only newer messages.
+ * Listens for NEW messages only: the first visit to a channel just sets the
+ * cursor to its newest message, nothing historical is fetched or stored.
  * Duplicate delivery is fine — the store dedupes on (channel, ts).
  */
 export async function startSlack({
@@ -95,13 +94,11 @@ export async function startSlack({
   onMessage,
   log = console.log,
   pollMs = 45_000,
-  backfillLimit = 100,
 }: {
   userToken: string;
   onMessage: (m: EnrichedMessage) => void;
   log?: (msg: string) => void;
   pollMs?: number;
-  backfillLimit?: number;
 }): Promise<SlackIntake> {
   if (!userToken.startsWith('xoxp-')) {
     throw new Error('user token must start with xoxp- (api.slack.com → your app → OAuth & Permissions → User OAuth Token)');
@@ -135,14 +132,20 @@ export async function startSlack({
   let stopped = false;
   let ticking = false;
   let tick = 0;
-  let live = false; // flips true once the backfill sweep finishes
 
   async function pollChannel(c: Convo) {
     const oldest = lastSeen.get(c.id);
+    if (!oldest) {
+      // first visit: set the cursor to the newest message and emit nothing —
+      // we listen for new messages only, never history
+      const r: any = await web.conversations.history({ channel: c.id, limit: 1 });
+      lastSeen.set(c.id, String(r.messages?.[0]?.ts ?? '0'));
+      return;
+    }
     const r: any = await web.conversations.history({
       channel: c.id,
-      limit: oldest ? 50 : backfillLimit,
-      ...(oldest ? { oldest } : {}), // exclusive — only strictly newer messages
+      limit: 50,
+      oldest, // exclusive — only strictly newer messages
     });
     const newest = r.messages?.[0]?.ts;
     for (const raw of (r.messages ?? []).slice().reverse()) {
@@ -153,10 +156,9 @@ export async function startSlack({
         userName: await userName(norm.user),
         channelName: c.type === 'im' ? 'DM' : c.name,
         isSelf: norm.user === self,
-        live,
       });
     }
-    if (newest && (!oldest || newest > oldest)) lastSeen.set(c.id, String(newest));
+    if (newest && newest > oldest) lastSeen.set(c.id, String(newest));
   }
 
   async function poll() {
@@ -175,9 +177,9 @@ export async function startSlack({
     }
   }
 
-  // Backfill runs in the background — connect returns as soon as the token
-  // and conversation list check out. Overlap is prevented by `ticking`.
-  void poll().then(() => { live = true; log('slack: backfill done'); });
+  // First sweep just plants cursors; runs in the background so connect
+  // returns as soon as the token and conversation list check out.
+  void poll().then(() => log('slack: listening for new messages'));
   const timer = setInterval(() => void poll(), pollMs);
   return {
     stop: async () => { stopped = true; clearInterval(timer); },

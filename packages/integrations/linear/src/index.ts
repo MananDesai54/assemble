@@ -1,7 +1,5 @@
 import { Hono } from 'hono';
 import type { IntegrationContext, IntegrationManifest } from '@assemble/core';
-import { myIssues } from './api';
-
 export * from './api';
 
 const apiKey = (ctx: IntegrationContext) => ctx.kv.get('linear_api_key') || process.env.LINEAR_API_KEY || '';
@@ -19,23 +17,15 @@ export const linearIntegration: IntegrationManifest = {
     return apiKey(ctx) ? { connected: true } : { connected: false };
   },
 
-  // Pull-based: nothing runs in the background. start() just validates the key.
+  // Deliberately inert for now: the key is stored and the integration shows
+  // as connected, but nothing is fetched from Linear until a feature needs it.
   async start(ctx) {
-    const key = apiKey(ctx);
-    if (!key) throw new Error('Linear key missing');
-    await myIssues(key);
+    if (!apiKey(ctx)) throw new Error('Linear key missing');
   },
 
   async stop() {},
 
-  routes(ctx) {
-    const app = new Hono();
-    app.get('/issues', async c => {
-      const key = apiKey(ctx);
-      if (!key) return c.json({ error: 'Linear not connected — open Settings → Integrations' }, 503);
-      try { return c.json(await myIssues(key)); }
-      catch (err) { return c.json({ error: (err as Error).message }, 502); }
-    });
-    return app;
+  routes() {
+    return new Hono();
   },
 };

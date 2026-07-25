@@ -562,13 +562,15 @@ function stepReady() {
 const CORE_NAV: { page: string; label: string; icon: string }[] = [
   { page: 'desk', label: 'Desk', icon: '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>' },
   { page: 'calls', label: 'Calls', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke-width="1.6"/><circle cx="8" cy="8" r="2"/></svg>' },
-  { page: 'work', label: 'Work', icon: '<svg viewBox="0 0 16 16"><path d="M2 4l4 4-4 4M8 12h6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
+  { page: 'work', label: 'Workflows', icon: '<svg viewBox="0 0 16 16"><path d="M2 4l4 4-4 4M8 12h6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { page: 'activity', label: 'Activity', icon: '<svg viewBox="0 0 16 16"><path d="M1 8h3l2-5 4 10 2-5h3" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { page: 'settings', label: 'Settings', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.4" fill="none" stroke-width="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M13 3l-1.7 1.7M4.7 11.3L3 13" stroke-width="1.6" stroke-linecap="round"/></svg>' },
 ];
 
 // Integration pages are client-side modules keyed by manifest id.
-const INTEGRATION_PAGES: Record<string, () => void> = { slack: pageSlack };
+// Integrations with their own page module get a sidebar entry when connected.
+// None currently — Slack's live feed lives inside Workflows.
+const INTEGRATION_PAGES: Record<string, () => void> = {};
 
 function navItems() {
   const integrations = state.integrations
@@ -641,37 +643,6 @@ function pageDesk() {
   $('#reteach').onclick = () => { state.setupReturn = true; state.setupStep = 1; setMode('setup'); };
 }
 
-/* ================= page: slack ================= */
-
-function pageSlack() {
-  $('#page').innerHTML = `
-    <div class="page-head">
-      <h2>Slack</h2>
-      <p>Everything captured locally. Click a message to draft a reply — nothing sends without you.</p>
-    </div>
-    <div class="pane">
-      <div class="pane-toolbar">
-        <button class="secondary" id="digest-btn" title="Summarize unread since last digest">Digest</button>
-        <span id="slack-status" class="pane-status"></span>
-      </div>
-      <pre id="digest-out" class="digest" hidden></pre>
-      <ul id="slack-log" class="feed"></ul>
-      <div id="draft-box" class="draft-box" hidden>
-        <div class="editor-head"><b id="draft-title"></b><button class="ghost" id="draft-close">✕</button></div>
-        <textarea id="draft-text" rows="3"></textarea>
-        <div style="display:flex; gap:8px;">
-          <button class="secondary" id="draft-send">Send to Slack</button>
-          <button class="secondary" id="draft-again">Redraft</button>
-        </div>
-      </div>
-    </div>`;
-  $('#digest-btn').onclick = runDigest;
-  $('#draft-close').onclick = () => { $('#draft-box').hidden = true; draftTarget = null; };
-  $('#draft-send').onclick = sendDraft;
-  $('#draft-again').onclick = redraft;
-  connectSlackFeed();
-}
-
 /* ================= page: calls ================= */
 
 function pageCalls() {
@@ -691,12 +662,12 @@ function pageCalls() {
   void refreshRecordings();
 }
 
-/* ================= page: work ================= */
+/* ================= page: workflows ================= */
 
 function pageWork() {
   $('#page').innerHTML = `
     <div class="page-head">
-      <h2>Work</h2>
+      <h2>Workflows</h2>
       <p>Claude Code sessions in any repo. Pick the directory per run — recents remembered.</p>
     </div>
     <div class="pane">
@@ -716,14 +687,14 @@ function pageWork() {
       </div>
       <ul id="work-list" class="feed"></ul>
     </div>
-    ${integrationById('linear')?.connected ? `
+    ${integrationById('slack')?.connected ? `
     <div class="pane">
-      <div class="pane-toolbar"><b class="pane-title">Linear</b><span id="linear-status" class="pane-status"></span></div>
-      <ul id="linear-list" class="feed"></ul>
+      <div class="pane-toolbar"><b class="pane-title">Slack</b><span id="slack-status" class="pane-status"></span></div>
+      <ul id="slack-log" class="feed"></ul>
     </div>` : ''}`;
   $('#work-run').onclick = runAgent;
   void refreshWork();
-  if (integrationById('linear')?.connected) void refreshLinear();
+  if (integrationById('slack')?.connected) connectSlackFeed();
 }
 
 /* ================= page: activity ================= */
@@ -1287,8 +1258,6 @@ interface SlackMsg {
   text: string;
 }
 
-let draftTarget: { channel: string; ts?: string; threadTs?: string | null } | null = null;
-
 function slackLine(m: SlackMsg) {
   const log = $('#slack-log');
   if (!log) return;
@@ -1296,68 +1265,8 @@ function slackLine(m: SlackMsg) {
   const who = m.userName ?? m.user_name ?? m.user ?? '?';
   const li = document.createElement('li');
   li.textContent = `#${chan}  ${who}: ${m.text}`;
-  li.title = 'Click to draft a reply';
-  li.style.cursor = 'pointer';
-  li.onclick = () => openDraft(m);
   log.prepend(li);
   while (log.children.length > 25) log.lastChild!.remove();
-}
-
-async function openDraft(m: SlackMsg) {
-  const box = $('#draft-box');
-  const ts = m.slackTs ?? m.slack_ts;
-  draftTarget = { channel: m.channel, ts, threadTs: m.threadTs ?? m.thread_ts ?? ts };
-  box.hidden = false;
-  $('#draft-title').textContent = `Reply to ${m.userName ?? m.user_name ?? m.user ?? '?'}`;
-  $('#draft-text').value = 'drafting…';
-  await redraft();
-}
-
-async function redraft() {
-  if (!draftTarget) return;
-  try {
-    const r = await fetch(`${SERVER}/integrations/slack/draft`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: draftTarget.channel, ts: draftTarget.ts }),
-    });
-    const data = await r.json();
-    $('#draft-text').value = r.ok ? data.draft : (data.error || 'draft failed');
-  } catch {
-    $('#draft-text').value = 'server offline';
-  }
-}
-
-async function sendDraft() {
-  if (!draftTarget) return;
-  const text = $('#draft-text').value.trim();
-  if (!text) return;
-  try {
-    const r = await fetch(`${SERVER}/integrations/slack/send`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ channel: draftTarget.channel, text, threadTs: draftTarget.threadTs }),
-    });
-    const data = await r.json();
-    if (r.ok && data.ok) { toast('Sent.'); $('#draft-box').hidden = true; draftTarget = null; }
-    else toast(`Send failed: ${data.error || 'unknown'}`);
-  } catch {
-    toast('Send failed: server offline');
-  }
-}
-
-async function runDigest() {
-  const btn = $('#digest-btn');
-  const out = $('#digest-out');
-  btn.disabled = true; btn.textContent = 'Digesting…';
-  try {
-    const r = await fetch(`${SERVER}/integrations/slack/digest`, { method: 'POST' });
-    const data = await r.json();
-    out.hidden = false;
-    out.textContent = r.ok ? `${data.summary}\n\n(${data.count} messages)` : (data.error || 'digest failed');
-  } catch {
-    out.hidden = false;
-    out.textContent = 'server offline';
-  }
-  btn.disabled = false; btn.textContent = 'Digest';
 }
 
 function connectSlackFeed() {
@@ -1380,7 +1289,7 @@ function connectSlackFeed() {
 
 function scheduleSlackRetry() {
   if (slackRetry) clearTimeout(slackRetry);
-  slackRetry = setTimeout(() => { if (state.page === 'slack') connectSlackFeed(); else openWs(); }, 30_000);
+  slackRetry = setTimeout(() => { if (state.page === 'work' && integrationById('slack')?.connected) connectSlackFeed(); else openWs(); }, 30_000);
 }
 
 // One WebSocket for everything the server pushes; handlers are null-safe so
@@ -1391,7 +1300,6 @@ function openWs() {
   slackWs.onmessage = e => {
     const payload = JSON.parse(e.data);
     if (payload.kind === 'slack-message') slackLine(payload.message);
-    if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
     if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
     if (payload.kind === 'voice-hotkey') voiceToggle();
     if (payload.kind === 'setup-progress') setupProgressLine(payload);
@@ -1541,35 +1449,6 @@ async function runAgent() {
   } catch {
     status.textContent = 'server offline';
   }
-}
-
-interface LinearIssueUi { identifier: string; title: string; state: string; url: string; description: string | null }
-
-async function refreshLinear() {
-  const status = $('#linear-status');
-  try {
-    const r = await fetch(`${SERVER}/integrations/linear/issues`);
-    const data = await r.json();
-    if (!r.ok) { if (status) status.textContent = data.error; return; }
-    if (status) status.textContent = '';
-    const list = $('#linear-list');
-    if (!list) return;
-    list.innerHTML = '';
-    for (const issue of data as LinearIssueUi[]) {
-      const li = document.createElement('li');
-      li.className = 'rec-item';
-      li.textContent = `${issue.identifier} · ${issue.state} · ${issue.title}`;
-      li.style.cursor = 'pointer';
-      li.title = 'Click to prefill a Claude Code session for this issue';
-      li.onclick = () => {
-        $('#work-prompt').value =
-          `Work on Linear issue ${issue.identifier}: ${issue.title}.\n${(issue.description ?? '').slice(0, 500)}`;
-        $('#work-prompt').scrollIntoView({ behavior: 'smooth', block: 'center' });
-        $('#work-prompt').focus();
-      };
-      list.appendChild(li);
-    }
-  } catch { /* server offline */ }
 }
 
 /* ================= pickers + corner editor ================= */
