@@ -7,3 +7,4 @@
 - [ ] **Note taking** — capture and organize notes locally.
 - [ ] **Learning section** — a place that surfaces what the system has learned about how I work.
 - [ ] **More interaction types** — improve STT as an interaction path, and add other tap/gesture types beyond corner knocks (scratches, slides, new surfaces) for triggering actions.
+- [ ] Have workflow around slack message to do different task based on messages.
