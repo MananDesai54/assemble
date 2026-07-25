@@ -1010,6 +1010,44 @@ interface ModelOption {
   speed?: string; quality?: string; ram?: string; strengths?: string;
 }
 
+function buildModelBlock(
+  g: { key: 'whisper' | 'llm'; title: string; hint: string },
+  data: { options: ModelOption[]; selected: string },
+): HTMLElement {
+  const { options, selected } = data;
+  const block = document.createElement('div');
+  block.className = 'model-select';
+  block.innerHTML = `
+    <div class="model-head"><b>${g.title}</b><span class="hint">${g.hint}</span></div>
+    <select class="model-dd">${options.map(o =>
+      `<option value="${o.id}" ${o.id === selected ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+    <div class="model-info"></div>`;
+  const dd = block.querySelector('.model-dd') as HTMLSelectElement;
+  const info = block.querySelector('.model-info') as HTMLElement;
+  const renderInfo = () => {
+    const o = options.find(x => x.id === dd.value)!;
+    info.innerHTML = [
+      `<span><b>Download</b> ${o.size}</span>`,
+      o.ram ? `<span><b>RAM</b> ${o.ram}</span>` : '',
+      o.speed ? `<span><b>Speed</b> ${o.speed}</span>` : '',
+      o.quality ? `<span><b>Quality</b> ${o.quality}</span>` : '',
+      o.strengths ? `<span><b>Strengths</b> ${o.strengths}</span>` : '',
+      `<span class="hint">${o.notes}</span>`,
+    ].filter(Boolean).join('');
+  };
+  dd.onchange = async () => {
+    renderInfo();
+    await fetch(`${SERVER}/setup/models`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [g.key]: dd.value }),
+    });
+    void refreshSetupStatus(); // selected model file may not be downloaded yet
+    toast(`${g.title} → ${options.find(x => x.id === dd.value)!.label}. Run "Install everything" if it needs a download.`);
+  };
+  renderInfo();
+  return block;
+}
+
 async function renderModelSelectors(container: HTMLElement) {
   let data: {
     whisper: { options: ModelOption[]; selected: string };
@@ -1021,7 +1059,7 @@ async function renderModelSelectors(container: HTMLElement) {
   } catch { return; }
   container.innerHTML = '';
 
-  // brain source: local vs bring-your-own-key
+  // Brain source: one card — Local shows the local model picker, BYOK shows the key fields.
   const src = document.createElement('div');
   src.className = 'model-select';
   src.innerHTML = `
@@ -1030,6 +1068,7 @@ async function renderModelSelectors(container: HTMLElement) {
       <span><b>Local</b> — runs on this Mac, nothing leaves your machine (recommended)</span></label>
     <label class="switch"><input type="radio" name="brain-src" value="byok" ${data.byok.source === 'byok' ? 'checked' : ''}/>
       <span><b>Your API key</b> — any OpenAI-compatible provider (OpenAI, OpenRouter, Groq, Gemini…)</span></label>
+    <div class="local-fields" ${data.byok.source === 'local' ? '' : 'hidden'}></div>
     <div class="byok-fields" ${data.byok.source === 'byok' ? '' : 'hidden'}>
       <span class="hint" style="color:var(--danger)">Heads up: Slack messages, call transcripts, and drafts will be sent to this provider.</span>
       <input id="byok-url" placeholder="Base URL — e.g. https://api.openai.com or https://openrouter.ai/api/v1" value="${data.byok.url}" />
@@ -1039,10 +1078,16 @@ async function renderModelSelectors(container: HTMLElement) {
       <span id="byok-status" class="hint"></span>
     </div>`;
   container.appendChild(src);
+  const localFields = src.querySelector('.local-fields') as HTMLElement;
   const byokFields = src.querySelector('.byok-fields') as HTMLElement;
+  localFields.appendChild(buildModelBlock(
+    { key: 'llm', title: 'Brain model', hint: 'Powers Slack triage, digests, drafts, call summaries, voice intents.' },
+    data.llm,
+  ));
   src.querySelectorAll('input[name="brain-src"]').forEach(el => {
     (el as HTMLInputElement).onchange = async (e: any) => {
       const source = e.target.value;
+      localFields.hidden = source !== 'local';
       byokFields.hidden = source !== 'byok';
       await fetch(`${SERVER}/setup/byok`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1070,44 +1115,11 @@ async function renderModelSelectors(container: HTMLElement) {
       status.textContent = 'Local server unreachable.';
     }
   };
-  const groups: { key: 'whisper' | 'llm'; title: string; hint: string }[] = [
+  // Speech model is always local — whisper transcribes calls/voice regardless of brain source.
+  container.appendChild(buildModelBlock(
     { key: 'whisper', title: 'Speech model', hint: 'Transcribes calls and voice commands. Auto-detects English / Hindi / Hinglish.' },
-    { key: 'llm', title: 'Brain model', hint: 'Powers Slack triage, digests, drafts, call summaries, voice intents.' },
-  ];
-  for (const g of groups) {
-    const { options, selected } = data[g.key];
-    const block = document.createElement('div');
-    block.className = 'model-select';
-    block.innerHTML = `
-      <div class="model-head"><b>${g.title}</b><span class="hint">${g.hint}</span></div>
-      <select class="model-dd">${options.map(o =>
-        `<option value="${o.id}" ${o.id === selected ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
-      <div class="model-info"></div>`;
-    const dd = block.querySelector('.model-dd') as HTMLSelectElement;
-    const info = block.querySelector('.model-info') as HTMLElement;
-    const renderInfo = () => {
-      const o = options.find(x => x.id === dd.value)!;
-      info.innerHTML = [
-        `<span><b>Download</b> ${o.size}</span>`,
-        o.ram ? `<span><b>RAM</b> ${o.ram}</span>` : '',
-        o.speed ? `<span><b>Speed</b> ${o.speed}</span>` : '',
-        o.quality ? `<span><b>Quality</b> ${o.quality}</span>` : '',
-        o.strengths ? `<span><b>Strengths</b> ${o.strengths}</span>` : '',
-        `<span class="hint">${o.notes}</span>`,
-      ].filter(Boolean).join('');
-    };
-    dd.onchange = async () => {
-      renderInfo();
-      await fetch(`${SERVER}/setup/models`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ [g.key]: dd.value }),
-      });
-      void refreshSetupStatus(); // selected model file may not be downloaded yet
-      toast(`${g.title} → ${options.find(x => x.id === dd.value)!.label}. Run "Install everything" if it needs a download.`);
-    };
-    renderInfo();
-    container.appendChild(block);
-  }
+    data.whisper,
+  ));
 }
 
 async function refreshSetupStatus(): Promise<Record<string, boolean>> {

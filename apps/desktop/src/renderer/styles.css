@@ -333,7 +333,9 @@ button { font: inherit; color: inherit; }
 .model-info { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--dim); }
 .model-info b { color: var(--ink); font-weight: 600; margin-right: 4px; }
 .model-info .hint { flex-basis: 100%; }
-.byok-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.byok-fields, .local-fields { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+/* the display rule above must not defeat the hidden attribute */
+.byok-fields[hidden], .local-fields[hidden] { display: none; }
 .byok-fields input {
   background: var(--bg); color: var(--ink); border: 1px solid var(--line);
   border-radius: 7px; padding: 8px; font: 13px Menlo, monospace; max-width: 480px;

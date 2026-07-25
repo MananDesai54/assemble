@@ -115,11 +115,15 @@ app.post('/setup/byok', async c => {
   llmCheckedAt = 0;
   const b = byokConfig();
   if (b.source === 'byok') {
-    if (!b.key) return c.json({ ok: false, error: 'API key required' });
+    // byok only sticks when the key actually works — otherwise fall back to
+    // local so status/setup rows never report a brain that can't answer.
+    const fallBack = () => { kvSet(db, 'llm_source', 'local'); llm = buildLlm(); };
+    if (!b.key) { fallBack(); return c.json({ ok: false, error: 'API key required' }); }
     try {
       const out = await llm.chat([{ role: 'user', content: 'Reply with the single word: ok' }], { maxTokens: 10 });
       return c.json({ ok: true, sample: out.slice(0, 40) });
     } catch (err) {
+      fallBack();
       return c.json({ ok: false, error: (err as Error).message });
     }
   }
