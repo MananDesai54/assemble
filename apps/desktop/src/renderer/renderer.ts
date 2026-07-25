@@ -435,6 +435,10 @@ function renderMain() {
         </div>
       </section>
       <div class="activity">
+        <h2>Slack <span id="slack-status" class="pane-status"></span></h2>
+        <ul id="slack-log"></ul>
+      </div>
+      <div class="activity">
         <h2>Activity</h2>
         <ul id="log"></ul>
       </div>
@@ -486,6 +490,60 @@ function renderMain() {
   }));
 
   if (!isTrained()) toast('Corners not taught yet — click "Teach corners" to start.');
+  connectSlackFeed();
+}
+
+/* ================= slack feed (local server) ================= */
+
+const SERVER = 'http://127.0.0.1:4817';
+let slackWs: WebSocket | null = null;
+let slackRetry: ReturnType<typeof setTimeout> | null = null;
+
+interface SlackMsg {
+  channelName?: string | null; channel_name?: string | null; channel: string;
+  userName?: string | null; user_name?: string | null; user?: string | null;
+  text: string;
+}
+
+function slackLine(m: SlackMsg) {
+  const log = $('#slack-log');
+  if (!log) return;
+  const chan = m.channelName ?? m.channel_name ?? m.channel;
+  const who = m.userName ?? m.user_name ?? m.user ?? '?';
+  const li = document.createElement('li');
+  li.textContent = `#${chan}  ${who}: ${m.text}`;
+  log.prepend(li);
+  while (log.children.length > 20) log.lastChild!.remove();
+}
+
+function connectSlackFeed() {
+  const status = $('#slack-status');
+  if (slackRetry) clearTimeout(slackRetry);
+  fetch(`${SERVER}/slack/recent?limit=15`)
+    .then(r => r.json())
+    .then((rows: SlackMsg[]) => {
+      if (status) status.textContent = '';
+      const log = $('#slack-log');
+      if (log) log.innerHTML = '';
+      for (const m of rows.reverse()) slackLine(m);
+      if (slackWs) slackWs.close();
+      slackWs = new WebSocket(`ws://127.0.0.1:4817/ws`);
+      slackWs.onmessage = e => {
+        const payload = JSON.parse(e.data);
+        if (payload.kind === 'slack-message') slackLine(payload.message);
+      };
+      slackWs.onclose = () => scheduleSlackRetry();
+    })
+    .catch(() => {
+      if (status) status.textContent = 'server offline — bun run server';
+      scheduleSlackRetry();
+    });
+}
+
+function scheduleSlackRetry() {
+  if (state.screen !== 'main') return;
+  if (slackRetry) clearTimeout(slackRetry);
+  slackRetry = setTimeout(connectSlackFeed, 30_000);
 }
 
 function isTrained(): boolean {

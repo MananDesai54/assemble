@@ -238,6 +238,7 @@ h1 { font-family: Futura, 'Avenir Next', sans-serif; font-weight: 500; font-size
   padding: 2px 0;
 }
 .activity li.hit { color: var(--ink); }
+.pane-status { text-transform: none; letter-spacing: 0; font-family: inherit; color: var(--danger); margin-left: 8px; }
 .activity li .conf { color: var(--amber); }
 
 /* ---------- calibration extras ---------- */

@@ -3,3 +3,4 @@ dist/
 models/
 *.log
 .env
+data/
