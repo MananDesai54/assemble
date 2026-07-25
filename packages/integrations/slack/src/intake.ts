@@ -48,8 +48,21 @@ export async function startSlack({
   onMessage: (m: EnrichedMessage) => void;
   log?: (msg: string) => void;
 }): Promise<SlackIntake> {
+  // Fail fast on the wrong token type — a non-xapp token makes socket.start()
+  // hang forever instead of erroring.
+  if (!appToken.startsWith('xapp-')) {
+    throw new Error('app token must start with xapp- (App-Level Token with connections:write — api.slack.com → your app → Basic Information)');
+  }
+  if (!botToken.startsWith('xoxb-')) {
+    throw new Error('bot token must start with xoxb- (OAuth → Bot User OAuth Token)');
+  }
   const socket = new SocketModeClient({ appToken });
   const web = new WebClient(botToken);
+  try {
+    await web.auth.test(); // verify the bot token before opening the socket
+  } catch (err) {
+    throw new Error(`bot token rejected by Slack: ${(err as Error).message}`);
+  }
   const userNames = new Map<string, string | null>();
   const channelNames = new Map<string, string | null>();
 
@@ -87,6 +100,15 @@ export async function startSlack({
 
   socket.on('connected', () => log('slack: socket connected'));
   socket.on('disconnected', () => log('slack: socket disconnected'));
-  await socket.start();
+  try {
+    await Promise.race([
+      socket.start(),
+      new Promise((_, reject) => setTimeout(() =>
+        reject(new Error('Slack socket timed out — enable Socket Mode on the app and check the xapp token has connections:write')), 15_000)),
+    ]);
+  } catch (err) {
+    await socket.disconnect().catch(() => {});
+    throw err;
+  }
   return { stop: () => socket.disconnect() };
 }

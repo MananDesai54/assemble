@@ -93,12 +93,20 @@ async function init() {
   $('#theme-toggle').onclick = toggleTheme;
   $('#armed').onchange = (e: any) => window.assemble.setArmed(e.target.checked);
   $('#armed').checked = state.config.armed;
-  window.assemble.onArmedChanged(v => { $('#armed').checked = v; setStatus(); });
+  // Single path for renderer- and tray-initiated changes (main echoes both):
+  // off = sensors fully released (mic indicator goes away), on = restart.
+  window.assemble.onArmedChanged(v => {
+    state.config.armed = v;
+    $('#armed').checked = v;
+    if (!v) stopSensors();
+    else if (!state.engine && state.mode === 'app') void startSensors();
+    setStatus();
+  });
   window.assemble.onVoiceToggle(() => voiceToggle());
 
   // Sensors never auto-start: mic begins in the setup flow (user-initiated) or
   // after the consent prompt on the app screen.
-  $('#status').onclick = () => { if (!state.engine && state.mode === 'app') showSensorConsent(); };
+  $('#status').onclick = () => { if (!state.engine && state.mode === 'app' && state.config.armed) showSensorConsent(); };
   openWs();
   await fetchIntegrations();
   setMode(state.config.onboarded ? 'app' : 'landing');
@@ -112,6 +120,15 @@ async function startSensors() {
     state.micError = (err as Error).message;
     setStatus();
   }
+}
+
+function stopSensors() {
+  if (state.engine) { state.engine.stop(); state.engine = null; }
+  if (state.camera) { state.camera.stop(); state.camera = null; }
+  state.whistle = null;
+  state.blow = null;
+  bg?.setLevel(0);
+  setStatus();
 }
 
 function showSensorConsent() {
@@ -200,7 +217,8 @@ function setStatus() {
   if (state.micError) { el.dataset.state = 'error'; $('#status-text').textContent = 'microphone unavailable'; return; }
   if (!state.engine) {
     el.dataset.state = 'off';
-    $('#status-text').textContent = state.mode === 'app' ? 'sensors off — click to start' : 'sensors off';
+    $('#status-text').textContent = !state.config.armed ? 'off — flip Listening to start'
+      : state.mode === 'app' ? 'sensors off — click to start' : 'sensors off';
     return;
   }
   if (state.config.armed) { el.dataset.state = 'live'; $('#status-text').textContent = 'listening'; }
