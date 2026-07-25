@@ -43,6 +43,14 @@ One mic can't triangulate, but each desk corner *sounds different* at the mic â€
 
 ## Install
 
+One line â€” installs bun if needed, clones, and launches:
+
+```bash
+curl -fsSL https://manandesai54.github.io/assemble/install.sh | sh
+```
+
+Or by hand:
+
 ```bash
 git clone https://github.com/MananDesai54/assemble.git
 cd assemble
