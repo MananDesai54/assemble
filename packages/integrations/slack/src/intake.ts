@@ -1,4 +1,5 @@
 import { WebClient } from '@slack/web-api';
+import { SocketModeClient } from '@slack/socket-mode';
 
 export interface NormalizedMessage {
   slackTs: string;
@@ -41,6 +42,24 @@ export function normalizeHistoryMessage(
 
 export interface SlackIntake {
   stop: () => Promise<void>;
+  /** 'push' = Socket Mode events (instant), 'poll' = history polling fallback. */
+  mode: 'push' | 'poll';
+}
+
+// Pure: one Events-API message event → normalized message, or null for noise.
+export function normalizeEvent(event: any, team?: string | null): NormalizedMessage | null {
+  if (!event || event.type !== 'message') return null;
+  if (event.subtype && event.subtype !== 'thread_broadcast') return null;
+  if (!event.text || !event.ts || !event.channel) return null;
+  return {
+    slackTs: String(event.ts),
+    channel: String(event.channel),
+    channelType: event.channel_type ?? null,
+    user: event.user ?? null,
+    text: String(event.text),
+    threadTs: event.thread_ts ?? null,
+    team: team ?? null,
+  };
 }
 
 interface Convo {
@@ -83,14 +102,20 @@ async function listConversations(web: WebClient): Promise<Convo[]> {
 }
 
 /**
- * Poll-based intake on a user token (xoxp): watches every conversation the
- * user is a member of — no bot invites, no Socket Mode, no public URL.
- * Listens for NEW messages only: the first visit to a channel just sets the
- * cursor to its newest message, nothing historical is fetched or stored.
+ * Intake on a user token (xoxp) — everything the user can read, no bot, no
+ * invites, new messages only (never history).
+ *
+ * Two transports:
+ * - `appToken` (xapp-, Socket Mode) present → PUSH: Slack delivers message
+ *   events instantly over an outbound WebSocket, exactly like an Events-API
+ *   webhook but with no public URL. Channels don't matter — one pipe.
+ * - otherwise → POLL fallback: budgeted per-channel history polling.
+ *
  * Duplicate delivery is fine — the store dedupes on (channel, ts).
  */
 export async function startSlack({
   userToken,
+  appToken = '',
   onMessage,
   log = console.log,
   pollMs = 2_000,
@@ -99,6 +124,8 @@ export async function startSlack({
   callsPerMinute = 45,
 }: {
   userToken: string;
+  /** Optional xapp- Socket Mode token — enables instant push instead of polling. */
+  appToken?: string;
   onMessage: (m: EnrichedMessage) => void;
   log?: (msg: string) => void;
   /** Target cadence for DMs and recently-active channels. */
@@ -123,9 +150,6 @@ export async function startSlack({
   const team: string | null = auth.team_id ?? null;
   const self = String(auth.user_id ?? '');
 
-  let convos = await listConversations(web);
-  log(`slack: watching ${convos.length} conversations as ${auth.user ?? self}`);
-
   const userNames = new Map<string, string | null>();
   async function userName(id: string | null): Promise<string | null> {
     if (!id) return null;
@@ -137,6 +161,52 @@ export async function startSlack({
     }
     return userNames.get(id) ?? null;
   }
+  const channelNames = new Map<string, string | null>();
+  async function channelName(id: string): Promise<string | null> {
+    if (!channelNames.has(id)) {
+      try {
+        const r = await web.conversations.info({ channel: id });
+        channelNames.set(id, r.channel?.name ?? null);
+      } catch { channelNames.set(id, null); }
+    }
+    return channelNames.get(id) ?? null;
+  }
+
+  /* ---- push transport: Socket Mode, like slack-receiver's webhook but local ---- */
+  if (appToken) {
+    if (!appToken.startsWith('xapp-')) {
+      throw new Error('app token must start with xapp- (Basic Information → App-Level Tokens, scope connections:write)');
+    }
+    const socket = new SocketModeClient({ appToken });
+    socket.on('message', async ({ event, body, ack }: any) => {
+      await ack();
+      const norm = normalizeEvent(event, body?.team_id ?? team);
+      if (!norm) return;
+      onMessage({
+        ...norm,
+        userName: await userName(norm.user),
+        channelName: norm.channelType === 'im' ? 'DM' : await channelName(norm.channel),
+        isSelf: norm.user === self,
+      });
+    });
+    socket.on('connected', () => log('slack: socket connected — push mode'));
+    socket.on('disconnected', () => log('slack: socket disconnected'));
+    try {
+      await Promise.race([
+        socket.start(),
+        new Promise((_, reject) => setTimeout(() =>
+          reject(new Error('Slack socket timed out — enable Socket Mode on the app and check the xapp token has connections:write')), 15_000)),
+      ]);
+    } catch (err) {
+      await socket.disconnect().catch(() => {});
+      throw err;
+    }
+    return { mode: 'push', stop: () => socket.disconnect() };
+  }
+
+  /* ---- poll transport: budgeted per-channel history polling ---- */
+  let convos = await listConversations(web);
+  log(`slack: watching ${convos.length} conversations as ${auth.user ?? self} (poll mode)`);
 
   const lastSeen = new Map<string, string>(); // channel id → newest ts already fetched
   const lastActivity = new Map<string, number>(); // channel id → ms epoch of last message
@@ -220,6 +290,7 @@ export async function startSlack({
   void poll().then(() => log('slack: listening for new messages'));
   const timer = setInterval(() => void poll(), 1_000);
   return {
+    mode: 'poll',
     stop: async () => { stopped = true; clearInterval(timer); },
   };
 }

@@ -40,3 +40,21 @@ describe('normalizeHistoryMessage', () => {
     expect(m?.channelType).toBe('im');
   });
 });
+
+describe('normalizeEvent (push transport)', () => {
+  it('normalizes a message event', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    const m = normalizeEvent({ type: 'message', ts: '5.0', channel: 'C9', channel_type: 'channel', user: 'U3', text: 'yo' }, 'T1');
+    expect(m).toEqual({
+      slackTs: '5.0', channel: 'C9', channelType: 'channel', user: 'U3',
+      text: 'yo', threadTs: null, team: 'T1',
+    });
+  });
+
+  it('drops joins/edits, keeps thread broadcasts', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    expect(normalizeEvent({ type: 'message', subtype: 'channel_join', ts: '1.0', channel: 'C9', text: 'joined' })).toBeNull();
+    expect(normalizeEvent({ type: 'message', subtype: 'thread_broadcast', ts: '2.0', channel: 'C9', user: 'U1', text: 'fyi', thread_ts: '1.0' })?.threadTs).toBe('1.0');
+    expect(normalizeEvent({ type: 'reaction_added' })).toBeNull();
+  });
+});

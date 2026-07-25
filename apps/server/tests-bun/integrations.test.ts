@@ -58,6 +58,7 @@ describe('registry', () => {
     await expect(connectIntegration(ctx, 'nope', {})).rejects.toThrow('unknown integration');
     // bun auto-loads .env — blank the fallbacks so slack start fails fast without tokens
     process.env.SLACK_USER_TOKEN = '';
+    process.env.SLACK_APP_TOKEN = '';
     await expect(connectIntegration(ctx, 'slack', {})).rejects.toThrow();
   });
 });

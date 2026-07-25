@@ -187,9 +187,13 @@ and drafts are sent to that provider.
 Paste your **user token** (`xoxp-…`, api.slack.com → your app → OAuth & Permissions →
 User OAuth Token) into onboarding's **Connect** step or Settings → Integrations. It listens
 to what *you* can read — every channel and DM you're in, no bot invites, no Socket Mode, no
-public URL. **New messages only**, near real-time — every conversation is polled continuously:
-DMs and recently-active channels every ~2 s, quiet ones every ~15 s, all under a global
-budget that respects Slack's rate limits. No history is fetched, no AI touches them; they land in
+public URL. **New messages only**, two transports:
+- **Instant push** (recommended): also paste an `xapp-…` app token (Basic Information →
+  App-Level Tokens, scope `connections:write`; Socket Mode on; Event Subscriptions →
+  *user* events `message.channels/groups/im/mpim`). Messages arrive the moment they're
+  sent — an Events-API webhook without the public URL.
+- **Polling fallback** (user token alone): every conversation polled continuously —
+  active ones ~2 s, quiet ones ~15 s, budgeted under Slack's rate limits. No history is fetched, no AI touches them; they land in
 the local database and the live feed on the Workflows page. DMs need
 the `im:read` user scope on your app — without it they're skipped automatically.
 `.env` (`SLACK_USER_TOKEN`) works as a fallback for headless runs.
