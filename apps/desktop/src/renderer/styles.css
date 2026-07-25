@@ -318,6 +318,12 @@ button { font: inherit; color: inherit; }
   border-radius: 7px; padding: 8px; font: 13px Menlo, monospace; width: 100%;
 }
 .int-icon svg { width: 14px; height: 14px; vertical-align: -2px; stroke: currentColor; fill: none; }
+/* brand marks keep their own colors — no mono recoloring, ever */
+.nav-item svg.brand, .int-icon svg.brand, .tab svg.brand { stroke: none; fill: none; }
+.int-tabs { margin-bottom: 14px; }
+.int-tabs .tab { display: inline-flex; align-items: center; gap: 7px; }
+.int-tabs .int-icon { display: inline-flex; }
+.int-ok { color: var(--amber); font-weight: 700; }
 
 /* ---------- model selectors ---------- */
 .model-selectors { display: flex; flex-direction: column; gap: 14px; width: 100%; text-align: left; }

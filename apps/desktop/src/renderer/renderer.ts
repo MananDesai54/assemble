@@ -1171,14 +1171,41 @@ async function installEverything() {
   btn.disabled = false; btn.textContent = 'Install everything';
 }
 
+let activeIntegrationTab: string | null = null;
+
 async function renderIntegrationsCatalog(container: HTMLElement) {
   await fetchIntegrations();
   container.innerHTML = '';
-  for (const info of state.integrations) {
+  if (!state.integrations.length) {
+    container.innerHTML = '<span class="hint">Local server offline — integrations unavailable.</span>';
+    return;
+  }
+  const tabs = document.createElement('div');
+  tabs.className = 'tabs int-tabs';
+  const cardHost = document.createElement('div');
+  container.append(tabs, cardHost);
+  if (!state.integrations.some(i => i.id === activeIntegrationTab)) activeIntegrationTab = state.integrations[0].id;
+  const renderActive = () => {
+    tabs.innerHTML = '';
+    for (const info of state.integrations) {
+      const t = document.createElement('button');
+      t.className = `tab${info.id === activeIntegrationTab ? ' active' : ''}`;
+      t.innerHTML = `<span class="int-icon">${info.icon}</span><span>${info.name}</span>${info.connected ? '<span class="int-ok">✓</span>' : ''}`;
+      t.onclick = () => { activeIntegrationTab = info.id; renderActive(); };
+      tabs.appendChild(t);
+    }
+    cardHost.innerHTML = '';
+    const active = state.integrations.find(i => i.id === activeIntegrationTab)!;
+    cardHost.appendChild(buildIntegrationCard(active, container));
+  };
+  renderActive();
+}
+
+function buildIntegrationCard(info: IntegrationInfo, container: HTMLElement): HTMLElement {
+  {
     const card = document.createElement('div');
     card.className = 'setup-inputs';
     card.innerHTML = `
-      <b><span class="int-icon">${info.icon}</span> ${info.name}</b>
       <span class="hint">${info.description}</span>
       ${info.fields.map(f => `
         ${f.help ? `<span class="hint">${f.help}</span>` : ''}
@@ -1226,9 +1253,8 @@ async function renderIntegrationsCatalog(container: HTMLElement) {
         else void renderIntegrationsCatalog(container);
       } catch { status.textContent = 'Local server unreachable.'; }
     };
-    container.appendChild(card);
+    return card;
   }
-  if (!state.integrations.length) container.innerHTML = '<span class="hint">Local server offline — integrations unavailable.</span>';
 }
 
 /* ================= slack feed ================= */
