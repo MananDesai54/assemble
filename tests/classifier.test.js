@@ -42,6 +42,14 @@ describe('TapClassifier', () => {
     expect(c2.classify(v).label).toBe(c.classify(v).label);
   });
 
+  it('clear(label) removes only that label', () => {
+    const c = trained();
+    c.clear('tl');
+    const counts = c.counts();
+    expect(counts.tl).toBeUndefined();
+    expect(counts.tr).toBe(8);
+  });
+
   it('empty classifier rejects everything', () => {
     const c = new TapClassifier();
     expect(c.classify(fingerprint(synthTap({ freq: 800 }))).label).toBe('ultron');

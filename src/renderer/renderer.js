@@ -200,11 +200,14 @@ function teachSteps() {
 function renderTeachStep() {
   const step = teachSteps()[state.teach.stepIdx];
   document.querySelectorAll('.corner').forEach(c => c.classList.remove('teach'));
+  const extra = $('#teach-extra');
+  extra.innerHTML = '';
   if (step.kind === 'zone') {
     $('#teach-title').textContent = `Tap the ${step.zone.label.toLowerCase()} corner`;
     $('#teach-hint').textContent = `Knock the ${step.zone.label.toLowerCase()} of your desk ${TAPS_PER_ZONE} times with a knuckle. Directly on the desk, not the laptop. Vary the strength a little.`;
     $(`.corner[data-zone="${step.zone.id}"]`).classList.add('teach');
-    $('#teach-progress').innerHTML = `<b>0</b> of ${TAPS_PER_ZONE}`;
+    const have = state.classifier.counts()[step.zone.id] || 0;
+    $('#teach-progress').innerHTML = `<b>${have}</b> of ${TAPS_PER_ZONE}`;
   } else {
     $('#teach-title').textContent = 'Now teach it what to ignore';
     $('#teach-hint').textContent = 'For ten seconds: type, click your mouse, clap, set something down. Every sound that is NOT a desk tap.';
@@ -217,6 +220,54 @@ function renderTeachStep() {
       if (state.teach.secondsLeft <= 0) finishTeach();
     }, 1000);
   }
+  // retry controls
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex; gap:10px; justify-content:center;';
+  const redo = document.createElement('button');
+  redo.className = 'secondary';
+  redo.textContent = step.kind === 'zone' ? 'Redo this corner' : 'Redo this step';
+  redo.onclick = () => redoStep();
+  row.appendChild(redo);
+  if (state.teach.stepIdx > 0) {
+    const back = document.createElement('button');
+    back.className = 'secondary';
+    back.textContent = 'Previous corner';
+    back.onclick = () => previousStep();
+    row.appendChild(back);
+    const over = document.createElement('button');
+    over.className = 'secondary';
+    over.textContent = 'Start over';
+    over.onclick = () => { clearInterval(state.teach.timer); renderTeach(); };
+    row.appendChild(over);
+  }
+  extra.appendChild(row);
+}
+
+function redoStep() {
+  const step = teachSteps()[state.teach.stepIdx];
+  clearInterval(state.teach.timer);
+  if (step.kind === 'zone') {
+    state.classifier.clear(step.zone.id);
+    const countEl = $(`#count-${step.zone.id}`);
+    if (countEl) countEl.textContent = '·';
+  } else {
+    state.classifier.clear(REJECT_LABEL);
+  }
+  renderTeachStep();
+}
+
+function previousStep() {
+  clearInterval(state.teach.timer);
+  const steps = teachSteps();
+  // wipe current step's partial samples, then the previous corner's, and redo it
+  const cur = steps[state.teach.stepIdx];
+  state.classifier.clear(cur.kind === 'zone' ? cur.zone.id : REJECT_LABEL);
+  state.teach.stepIdx--;
+  const prev = steps[state.teach.stepIdx];
+  state.classifier.clear(prev.zone.id);
+  const countEl = $(`#count-${prev.zone.id}`);
+  if (countEl) countEl.textContent = '·';
+  renderTeachStep();
 }
 
 function teachCollect(vec) {

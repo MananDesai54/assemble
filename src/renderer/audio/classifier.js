@@ -12,6 +12,7 @@ export class TapClassifier {
 
   addSample(label, vec) { this.samples.push({ label, vec: Array.from(vec) }); }
   clearAll() { this.samples = []; }
+  clear(label) { this.samples = this.samples.filter(s => s.label !== label); }
   counts() {
     const c = {};
     for (const s of this.samples) c[s.label] = (c[s.label] || 0) + 1;
