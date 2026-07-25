@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; worker-src blob:" />
+  <title>assemble</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header id="topbar">
+    <span class="wordmark">assemble</span>
+    <span id="status" class="status" data-state="off"><span class="dot"></span><span id="status-text">starting…</span></span>
+    <div class="topbar-right">
+      <button id="theme-toggle" class="ghost" title="Switch theme">◐</button>
+      <label class="switch" id="armed-wrap" hidden>
+        <input type="checkbox" id="armed" />
+        <span>Listening</span>
+      </label>
+    </div>
+  </header>
+
+  <main id="screen"></main>
+
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

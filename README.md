@@ -99,10 +99,23 @@ Click a corner card — each corner takes up to three actions, one per knock pat
 
 ## Development
 
-```bash
-npm test   # 46 unit tests (detector, fingerprint, classifier, rhythm, pitch/whistle, blow, motion, actions, config)
+TypeScript monorepo on Bun workspaces:
+
+```
+apps/desktop      Electron app (esbuild-bundled TS)
+apps/server      (coming) local daemon: Slack, storage, model jobs
+packages/core     shared types + zone model
+packages/dsp      pure audio DSP — no Electron dependency, tested in Node
+packages/actions  action model + macOS executor
 ```
 
-Pure-DSP modules (`src/renderer/audio/`) have no Electron dependency — they run in Node under Vitest against synthesized tap fixtures.
+```bash
+bun install
+bun test          # 46 unit tests via vitest
+bun run typecheck
+bun start         # build + launch desktop app
+```
 
 Config lives at `~/Library/Application Support/assemble/config.json` — delete it for a factory reset.
+
+Roadmap (Slack intake, local Gemma 4 via llama.cpp, whisper.cpp call transcription, voice actions): `docs/superpowers/specs/2026-07-25-assemble-platform-design.md`.
