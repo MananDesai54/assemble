@@ -435,8 +435,20 @@ function renderMain() {
         </div>
       </section>
       <div class="activity">
-        <h2>Slack <span id="slack-status" class="pane-status"></span></h2>
+        <h2>Slack
+          <button class="ghost" id="digest-btn" title="Summarize unread since last digest">Digest</button>
+          <span id="slack-status" class="pane-status"></span>
+        </h2>
+        <pre id="digest-out" class="digest" hidden></pre>
         <ul id="slack-log"></ul>
+        <div id="draft-box" class="draft-box" hidden>
+          <div class="editor-head"><b id="draft-title"></b><button class="ghost" id="draft-close">✕</button></div>
+          <textarea id="draft-text" rows="3"></textarea>
+          <div style="display:flex; gap:8px;">
+            <button class="secondary" id="draft-send">Send to Slack</button>
+            <button class="secondary" id="draft-again">Redraft</button>
+          </div>
+        </div>
       </div>
       <div class="activity">
         <h2>Activity</h2>
@@ -490,6 +502,10 @@ function renderMain() {
   }));
 
   if (!isTrained()) toast('Corners not taught yet — click "Teach corners" to start.');
+  $('#digest-btn').onclick = runDigest;
+  $('#draft-close').onclick = () => { $('#draft-box').hidden = true; draftTarget = null; };
+  $('#draft-send').onclick = sendDraft;
+  $('#draft-again').onclick = redraft;
   connectSlackFeed();
 }
 
@@ -502,8 +518,11 @@ let slackRetry: ReturnType<typeof setTimeout> | null = null;
 interface SlackMsg {
   channelName?: string | null; channel_name?: string | null; channel: string;
   userName?: string | null; user_name?: string | null; user?: string | null;
+  slackTs?: string; slack_ts?: string; threadTs?: string | null; thread_ts?: string | null;
   text: string;
 }
+
+let draftTarget: { channel: string; ts?: string; threadTs?: string | null } | null = null;
 
 function slackLine(m: SlackMsg) {
   const log = $('#slack-log');
@@ -512,8 +531,68 @@ function slackLine(m: SlackMsg) {
   const who = m.userName ?? m.user_name ?? m.user ?? '?';
   const li = document.createElement('li');
   li.textContent = `#${chan}  ${who}: ${m.text}`;
+  li.title = 'Click to draft a reply';
+  li.style.cursor = 'pointer';
+  li.onclick = () => openDraft(m);
   log.prepend(li);
   while (log.children.length > 20) log.lastChild!.remove();
+}
+
+async function openDraft(m: SlackMsg) {
+  const box = $('#draft-box');
+  const ts = m.slackTs ?? m.slack_ts;
+  draftTarget = { channel: m.channel, ts, threadTs: m.threadTs ?? m.thread_ts ?? ts };
+  box.hidden = false;
+  $('#draft-title').textContent = `Reply to ${m.userName ?? m.user_name ?? m.user ?? '?'}`;
+  $('#draft-text').value = 'drafting…';
+  await redraft();
+}
+
+async function redraft() {
+  if (!draftTarget) return;
+  try {
+    const r = await fetch(`${SERVER}/slack/draft`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: draftTarget.channel, ts: draftTarget.ts }),
+    });
+    const data = await r.json();
+    $('#draft-text').value = r.ok ? data.draft : (data.error || 'draft failed');
+  } catch {
+    $('#draft-text').value = 'server offline';
+  }
+}
+
+async function sendDraft() {
+  if (!draftTarget) return;
+  const text = $('#draft-text').value.trim();
+  if (!text) return;
+  try {
+    const r = await fetch(`${SERVER}/slack/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: draftTarget.channel, text, threadTs: draftTarget.threadTs }),
+    });
+    const data = await r.json();
+    if (r.ok && data.ok) { toast('Sent.'); $('#draft-box').hidden = true; draftTarget = null; }
+    else toast(`Send failed: ${data.error || 'unknown'}`);
+  } catch {
+    toast('Send failed: server offline');
+  }
+}
+
+async function runDigest() {
+  const btn = $('#digest-btn');
+  const out = $('#digest-out');
+  btn.disabled = true; btn.textContent = 'Digesting…';
+  try {
+    const r = await fetch(`${SERVER}/slack/digest`, { method: 'POST' });
+    const data = await r.json();
+    out.hidden = false;
+    out.textContent = r.ok ? `${data.summary}\n\n(${data.count} messages)` : (data.error || 'digest failed');
+  } catch {
+    out.hidden = false;
+    out.textContent = 'server offline';
+  }
+  btn.disabled = false; btn.textContent = 'Digest';
 }
 
 function connectSlackFeed() {
@@ -531,6 +610,7 @@ function connectSlackFeed() {
       slackWs.onmessage = e => {
         const payload = JSON.parse(e.data);
         if (payload.kind === 'slack-message') slackLine(payload.message);
+        if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
       };
       slackWs.onclose = () => scheduleSlackRetry();
     })

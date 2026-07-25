@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@assemble/core": "workspace:*",
+    "@assemble/llm": "workspace:*",
     "@slack/socket-mode": "^2.0.0",
     "@slack/web-api": "^7.0.0",
     "hono": "^4.0.0"

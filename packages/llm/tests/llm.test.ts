@@ -1,0 +1,75 @@
+import { describe, it, expect } from 'vitest';
+import { Llm, scoreUrgency, digestMessages, draftReply } from '../src/index';
+
+function fakeLlm(reply: string, calls: any[] = []) {
+  const fetchFn = async (url: string, init?: any) => {
+    calls.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+    return {
+      ok: true,
+      json: async () => ({ choices: [{ message: { content: reply } }] }),
+    } as Response;
+  };
+  return { llm: new Llm({ url: 'http://test', fetchFn: fetchFn as any }), calls };
+}
+
+describe('Llm.chat', () => {
+  it('posts to /v1/chat/completions and returns content', async () => {
+    const { llm, calls } = fakeLlm('hello back', []);
+    const out = await llm.chat([{ role: 'user', content: 'hi' }]);
+    expect(out).toBe('hello back');
+    expect(calls[0].url).toBe('http://test/v1/chat/completions');
+    expect(calls[0].body.messages[0].content).toBe('hi');
+  });
+});
+
+describe('scoreUrgency', () => {
+  const msg = { channelName: 'eng', userName: 'Priya', text: 'prod is down!!' };
+
+  it('parses urgent JSON verdict', async () => {
+    const { llm } = fakeLlm('{"urgent": true, "reason": "production outage"}');
+    const r = await scoreUrgency(llm, msg);
+    expect(r.urgent).toBe(true);
+    expect(r.reason).toBe('production outage');
+  });
+
+  it('handles fenced JSON', async () => {
+    const { llm } = fakeLlm('```json\n{"urgent": false, "reason": "chitchat"}\n```');
+    expect((await scoreUrgency(llm, msg)).urgent).toBe(false);
+  });
+
+  it('defaults to not-urgent on garbage output', async () => {
+    const { llm } = fakeLlm('cannot parse this');
+    const r = await scoreUrgency(llm, msg);
+    expect(r.urgent).toBe(false);
+  });
+});
+
+describe('digestMessages', () => {
+  it('includes messages in prompt and returns summary', async () => {
+    const { llm, calls } = fakeLlm('- eng: prod fixed', []);
+    const out = await digestMessages(llm, [
+      { channelName: 'eng', userName: 'Priya', text: 'prod is fixed' },
+    ]);
+    expect(out).toContain('prod fixed');
+    const prompt = JSON.stringify(calls[0].body);
+    expect(prompt).toContain('prod is fixed');
+  });
+
+  it('empty input short-circuits without calling the model', async () => {
+    const calls: any[] = [];
+    const { llm } = fakeLlm('should not be called', calls);
+    const out = await digestMessages(llm, []);
+    expect(out).toBe('Nothing new.');
+    expect(calls.length).toBe(0);
+  });
+});
+
+describe('draftReply', () => {
+  it('returns trimmed draft', async () => {
+    const { llm } = fakeLlm('  Sounds good, shipping it today.  ');
+    const out = await draftReply(llm, [
+      { channelName: 'eng', userName: 'Priya', text: 'can you ship today?' },
+    ], { userName: 'Priya', text: 'can you ship today?' });
+    expect(out).toBe('Sounds good, shipping it today.');
+  });
+});

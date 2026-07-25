@@ -19,9 +19,9 @@ describe('db', () => {
 
   it('dedupes on (channel, slack_ts)', () => {
     const db = fresh();
-    expect(insertMessage(db, { slackTs: '1.0', channel: 'C1', text: 'x' })).toBe(true);
-    expect(insertMessage(db, { slackTs: '1.0', channel: 'C1', text: 'x again' })).toBe(false);
-    expect(insertMessage(db, { slackTs: '1.0', channel: 'C2', text: 'other channel' })).toBe(true);
+    expect(insertMessage(db, { slackTs: '1.0', channel: 'C1', text: 'x' })).not.toBe(null);
+    expect(insertMessage(db, { slackTs: '1.0', channel: 'C1', text: 'x again' })).toBe(null);
+    expect(insertMessage(db, { slackTs: '1.0', channel: 'C2', text: 'other channel' })).not.toBe(null);
     expect(recentMessages(db, 10).length).toBe(2);
   });
 

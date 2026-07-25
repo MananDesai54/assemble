@@ -103,18 +103,41 @@ TypeScript monorepo on Bun workspaces:
 
 ```
 apps/desktop      Electron app (esbuild-bundled TS)
-apps/server      (coming) local daemon: Slack, storage, model jobs
+apps/server       local daemon :4817 — Slack intake, SQLite, AI endpoints
 packages/core     shared types + zone model
 packages/dsp      pure audio DSP — no Electron dependency, tested in Node
 packages/actions  action model + macOS executor
+packages/llm      llama-server client + prompts (urgency, digest, drafts)
+packages/stt      whisper.cpp wrapper (local speech-to-text)
 ```
 
 ```bash
 bun install
-bun test          # 46 unit tests via vitest
+bun test              # vitest suite
+bun test apps/server/tests-bun   # bun:sqlite tests
 bun run typecheck
-bun start         # build + launch desktop app
+bun start             # build + launch desktop app
+bun run server        # local daemon (Slack + AI endpoints)
 ```
+
+### Local AI (no cloud, ever)
+
+```bash
+scripts/setup-models.sh   # brew: llama.cpp + whisper.cpp; downloads whisper medium (~1.5 GB)
+scripts/start-llm.sh      # Gemma 4 12B Q4_K_M via llama-server on :4820 (first run downloads ~7 GB)
+```
+
+With the server + LLM running:
+
+- **Urgent pings** — every captured Slack message is triaged by Gemma locally; genuinely urgent ones raise a macOS notification.
+- **Digest** — button in the Slack pane summarizes everything since your last digest.
+- **Draft replies** — click any message in the pane → local draft appears → edit → "Send to Slack". Nothing sends without your click.
+
+### Slack setup
+
+Socket Mode (no public URL): enable Socket Mode on your Slack app, create an app-level
+token with `connections:write`, put it in `.env` as `SLACK_APP_TOKEN` alongside
+`SLACK_BOT_TOKEN`. Bot must be invited to channels you want captured.
 
 Config lives at `~/Library/Application Support/assemble/config.json` — delete it for a factory reset.
 

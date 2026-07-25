@@ -239,6 +239,19 @@ h1 { font-family: Futura, 'Avenir Next', sans-serif; font-weight: 500; font-size
 }
 .activity li.hit { color: var(--ink); }
 .pane-status { text-transform: none; letter-spacing: 0; font-family: inherit; color: var(--danger); margin-left: 8px; }
+.digest {
+  background: var(--panel); border: 1px solid var(--amber); border-radius: 10px;
+  padding: 12px; margin: 8px 0; white-space: pre-wrap;
+  font: 12.5px/1.5 Menlo, monospace; color: var(--ink);
+}
+.draft-box {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 12px; margin-top: 8px; display: flex; flex-direction: column; gap: 8px;
+}
+.draft-box textarea {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 7px; padding: 8px; font: inherit; resize: vertical;
+}
 .activity li .conf { color: var(--amber); }
 
 /* ---------- calibration extras ---------- */
