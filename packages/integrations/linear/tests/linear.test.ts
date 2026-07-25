@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { myIssues } from '../src/index';
+import { myIssues } from '../src/api';
 
 describe('myIssues', () => {
   it('queries with the api key and normalizes nodes', async () => {

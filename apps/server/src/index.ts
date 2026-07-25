@@ -10,7 +10,7 @@ import {
   openDb, kvGet, kvSet,
   insertRecording, updateRecording, listRecordings, getRecording,
 } from './db';
-import { myIssues } from '@assemble/linear';
+import { myIssues } from '@assemble/integration-linear';
 import {
   startSlack, type SlackIntake, ensureSlackTables, insertMessage, recentMessages,
   setUrgency, messagesAfter, channelMessages, lastMessageId,

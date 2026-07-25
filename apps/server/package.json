@@ -11,7 +11,7 @@
     "@assemble/actions": "workspace:*",
     "@assemble/core": "workspace:*",
     "@assemble/integration-slack": "workspace:*",
-    "@assemble/linear": "workspace:*",
+    "@assemble/integration-linear": "workspace:*",
     "@assemble/llm": "workspace:*",
     "@assemble/stt": "workspace:*",
     "@slack/socket-mode": "^2.0.0",
