@@ -94,18 +94,21 @@ export async function startSlack({
   onMessage,
   log = console.log,
   pollMs = 2_000,
-  fullSweepEvery = 30,
-  hotWindowMs = 10 * 60_000,
+  coldMs = 15_000,
+  hotWindowMs = 60 * 60_000,
+  callsPerMinute = 45,
 }: {
   userToken: string;
   onMessage: (m: EnrichedMessage) => void;
   log?: (msg: string) => void;
-  /** Fast tick — polls DMs and recently-active channels. */
+  /** Target cadence for DMs and recently-active channels. */
   pollMs?: number;
-  /** Every Nth tick polls ALL conversations (catches quiet channels waking up). */
-  fullSweepEvery?: number;
+  /** Target cadence for quiet channels — every channel is always polled. */
+  coldMs?: number;
   /** A channel counts as hot for this long after its last message. */
   hotWindowMs?: number;
+  /** Global API budget — stays under Slack's ~50/min tier so nothing stalls on 429. */
+  callsPerMinute?: number;
 }): Promise<SlackIntake> {
   if (!userToken.startsWith('xoxp-')) {
     throw new Error('user token must start with xoxp- (api.slack.com → your app → OAuth & Permissions → User OAuth Token)');
@@ -137,6 +140,7 @@ export async function startSlack({
 
   const lastSeen = new Map<string, string>(); // channel id → newest ts already fetched
   const lastActivity = new Map<string, number>(); // channel id → ms epoch of last message
+  const lastPolled = new Map<string, number>(); // channel id → ms epoch of last poll
   let stopped = false;
   let ticking = false;
   let tick = 0;
@@ -144,6 +148,18 @@ export async function startSlack({
   const isHot = (c: Convo) =>
     c.type === 'im' || c.type === 'mpim' ||
     Date.now() - (lastActivity.get(c.id) ?? 0) < hotWindowMs;
+
+  // Token bucket keeps total API calls under Slack's rate tier — hot channels
+  // get their 2s cadence first, quiet ones share whatever budget remains.
+  const bucket = { tokens: callsPerMinute, last: Date.now() };
+  function takeToken(): boolean {
+    const now = Date.now();
+    bucket.tokens = Math.min(callsPerMinute, bucket.tokens + ((now - bucket.last) * callsPerMinute) / 60_000);
+    bucket.last = now;
+    if (bucket.tokens < 1) return false;
+    bucket.tokens -= 1;
+    return true;
+  }
 
   async function pollChannel(c: Convo) {
     const oldest = lastSeen.get(c.id);
@@ -181,13 +197,16 @@ export async function startSlack({
     ticking = true;
     try {
       tick++;
-      const full = tick === 1 || tick % fullSweepEvery === 0;
-      if (tick % (fullSweepEvery * 10) === 0) convos = await listConversations(web).catch(() => convos);
-      // fast ticks hit only hot conversations (DMs + recently active); if the
-      // hot set ever grows large the SDK queues on 429 rather than failing
-      const targets = full ? convos : convos.filter(isHot);
-      for (const c of targets) {
-        if (stopped) break;
+      if (tick % 600 === 0) convos = await listConversations(web).catch(() => convos); // refresh list ~10 min
+      const now = Date.now();
+      // every channel is always in rotation — hot ones aim for pollMs, quiet
+      // ones for coldMs; most-starved first, all bounded by the token bucket
+      const due = convos
+        .filter(c => now - (lastPolled.get(c.id) ?? 0) >= (isHot(c) ? pollMs : coldMs))
+        .sort((a, b) => (lastPolled.get(a.id) ?? 0) - (lastPolled.get(b.id) ?? 0));
+      for (const c of due) {
+        if (stopped || !takeToken()) break;
+        lastPolled.set(c.id, Date.now());
         await pollChannel(c).catch(err =>
           log(`slack: poll ${c.name ?? c.id} failed — ${(err as any)?.data?.error ?? (err as Error).message}`));
       }
@@ -199,7 +218,7 @@ export async function startSlack({
   // First sweep just plants cursors; runs in the background so connect
   // returns as soon as the token and conversation list check out.
   void poll().then(() => log('slack: listening for new messages'));
-  const timer = setInterval(() => void poll(), pollMs);
+  const timer = setInterval(() => void poll(), 1_000);
   return {
     stop: async () => { stopped = true; clearInterval(timer); },
   };
