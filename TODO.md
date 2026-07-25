@@ -1,3 +1,8 @@
 # TODO
 
-<!-- add items below -->
+- [ ] **Fine-tune the LLM on my usage** — train on captured Slack conversations, call transcripts, drafts I edited, and actions I took, so the brain drafts/triages the way I actually work.
+- [ ] **Only fetch requested data from sources** — pull data on demand instead of bulk-syncing everything; integrations should ask for exactly what a feature needs, when it needs it.
+- [ ] **Automate flows with Claude Code (devhub-style)** — chain Claude Code sessions into repeatable flows like we did in devhub, triggered from issues/messages/gestures.
+- [ ] **Support more automations** — grow the automation catalog beyond the current presets (more triggers, more actions, user-composable).
+- [ ] **Note taking** — capture and organize notes locally.
+- [ ] **Learning section** — a place that surfaces what the system has learned about how I work.
