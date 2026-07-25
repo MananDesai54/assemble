@@ -427,7 +427,7 @@ function setupNext() {
   renderSetup();
 }
 
-function stepFooter(body: HTMLElement, { next = 'Continue', skippable = true }: { next?: string; skippable?: boolean } = {}) {
+function stepFooter(body: HTMLElement, { next = 'Continue', skippable = true }: { next?: string; skippable?: boolean } = {}): HTMLButtonElement {
   const row = document.createElement('div');
   row.className = 'setup-footer';
   const btn = document.createElement('button');
@@ -443,6 +443,7 @@ function stepFooter(body: HTMLElement, { next = 'Continue', skippable = true }: 
     row.appendChild(skip);
   }
   body.appendChild(row);
+  return btn;
 }
 
 function stepMic() {
@@ -503,9 +504,12 @@ function stepBrain() {
     </div>
     <button class="primary" id="install-all">Install everything</button>`;
   void renderModelSelectors($('#model-selectors'));
-  void refreshSetupStatus();
   $('#install-all').onclick = installEverything;
-  stepFooter(body);
+  // Continue appears only once everything is installed — Skip covers opting out.
+  const cont = stepFooter(body);
+  cont.id = 'setup-continue';
+  cont.hidden = true;
+  void refreshSetupStatus();
 }
 
 function stepConnect() {
@@ -1131,6 +1135,9 @@ async function refreshSetupStatus(): Promise<Record<string, boolean>> {
       el.textContent = s[r.key] ? '✓' : '○';
       el.className = `state ${s[r.key] ? 'ok' : 'todo'}`;
     }
+    // Brain step's Continue stays hidden until every install row is done.
+    const cont = $('#setup-continue');
+    if (cont) cont.hidden = !SETUP_ROWS.every(r => s[r.key]);
     return s;
   } catch {
     return {};
