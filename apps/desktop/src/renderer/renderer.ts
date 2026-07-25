@@ -458,6 +458,7 @@ function stepBrain() {
     <div class="eyebrow">step 3 · brain</div>
     <h1>Give it a brain.</h1>
     <p class="lede">Everything installs and runs on this Mac — no cloud AI, nothing leaves your machine. Powers Slack triage, digests, drafts, call summaries, and voice commands.</p>
+    <div id="model-selectors" class="model-selectors"></div>
     <div class="setup-rows" id="setup-rows">
       ${SETUP_ROWS.map(r => `
         <div class="setup-row" data-step="${r.step}">
@@ -467,6 +468,7 @@ function stepBrain() {
         </div>`).join('')}
     </div>
     <button class="primary" id="install-all">Install everything</button>`;
+  void renderModelSelectors($('#model-selectors'));
   void refreshSetupStatus();
   $('#install-all').onclick = installEverything;
   stepFooter(body);
@@ -823,7 +825,8 @@ function renderSettingsTab() {
   }
   if (state.settingsTab === 'ai') {
     body.innerHTML = `
-      <p class="hint">All local — llama.cpp + whisper.cpp, Gemma 4 12B. Nothing leaves this Mac.</p>
+      <p class="hint">All local — llama.cpp + whisper.cpp. Nothing leaves this Mac. Changing a model may need a new download (run "Install everything" after switching); the brain restarts automatically if it's running.</p>
+      <div id="model-selectors" class="model-selectors"></div>
       <div class="setup-rows" id="setup-rows">
         ${SETUP_ROWS.map(r => `
           <div class="setup-row" data-step="${r.step}">
@@ -833,6 +836,7 @@ function renderSettingsTab() {
           </div>`).join('')}
       </div>
       <button class="primary" id="install-all">Install everything</button>`;
+    void renderModelSelectors($('#model-selectors'));
     void refreshSetupStatus();
     $('#install-all').onclick = installEverything;
   }
@@ -980,10 +984,61 @@ function cancelTeach() {
 const SETUP_ROWS = [
   { key: 'llamaCpp', step: 'llama.cpp', label: 'AI engine — llama.cpp' },
   { key: 'whisperCpp', step: 'whisper-cpp', label: 'Speech engine — whisper.cpp' },
-  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model — whisper large-v3-turbo (1.6 GB, English + Hindi + Gujarati)' },
-  { key: 'audiotap', step: 'audiotap', label: 'Call capture helper' },
-  { key: 'llmRunning', step: 'llm-start', label: 'Local AI on — Gemma 4 12B (7 GB, first time only)' },
+  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model downloaded (your selection above)' },
+  { key: 'audiotap', step: 'audiotap', label: 'Call capture + hotkey helpers' },
+  { key: 'llmRunning', step: 'llm-start', label: 'Brain running (downloads your selection on first start)' },
 ] as const;
+
+interface ModelOption {
+  id: string; label: string; size: string; notes: string;
+  speed?: string; quality?: string; ram?: string; strengths?: string;
+}
+
+async function renderModelSelectors(container: HTMLElement) {
+  let data: { whisper: { options: ModelOption[]; selected: string }; llm: { options: ModelOption[]; selected: string } };
+  try {
+    data = await (await fetch(`${SERVER}/setup/models`)).json();
+  } catch { return; }
+  container.innerHTML = '';
+  const groups: { key: 'whisper' | 'llm'; title: string; hint: string }[] = [
+    { key: 'whisper', title: 'Speech model', hint: 'Transcribes calls and voice commands. Auto-detects English / Hindi / Hinglish.' },
+    { key: 'llm', title: 'Brain model', hint: 'Powers Slack triage, digests, drafts, call summaries, voice intents.' },
+  ];
+  for (const g of groups) {
+    const { options, selected } = data[g.key];
+    const block = document.createElement('div');
+    block.className = 'model-select';
+    block.innerHTML = `
+      <div class="model-head"><b>${g.title}</b><span class="hint">${g.hint}</span></div>
+      <select class="model-dd">${options.map(o =>
+        `<option value="${o.id}" ${o.id === selected ? 'selected' : ''}>${o.label}</option>`).join('')}</select>
+      <div class="model-info"></div>`;
+    const dd = block.querySelector('.model-dd') as HTMLSelectElement;
+    const info = block.querySelector('.model-info') as HTMLElement;
+    const renderInfo = () => {
+      const o = options.find(x => x.id === dd.value)!;
+      info.innerHTML = [
+        `<span><b>Download</b> ${o.size}</span>`,
+        o.ram ? `<span><b>RAM</b> ${o.ram}</span>` : '',
+        o.speed ? `<span><b>Speed</b> ${o.speed}</span>` : '',
+        o.quality ? `<span><b>Quality</b> ${o.quality}</span>` : '',
+        o.strengths ? `<span><b>Strengths</b> ${o.strengths}</span>` : '',
+        `<span class="hint">${o.notes}</span>`,
+      ].filter(Boolean).join('');
+    };
+    dd.onchange = async () => {
+      renderInfo();
+      await fetch(`${SERVER}/setup/models`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [g.key]: dd.value }),
+      });
+      void refreshSetupStatus(); // selected model file may not be downloaded yet
+      toast(`${g.title} → ${options.find(x => x.id === dd.value)!.label}. Run "Install everything" if it needs a download.`);
+    };
+    renderInfo();
+    container.appendChild(block);
+  }
+}
 
 async function refreshSetupStatus(): Promise<Record<string, boolean>> {
   try {

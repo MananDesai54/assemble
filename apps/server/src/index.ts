@@ -18,7 +18,11 @@ import { existsSync, rmSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LlmRuntime } from './llm-runtime';
-import { toolStatus, runSetupStep, SETUP_STEPS, WHISPER_MODEL_PATH, AUDIOTAP_BIN, KEYWATCH_BIN, type SetupStep } from './setup';
+import {
+  toolStatus, runSetupStep, SETUP_STEPS, AUDIOTAP_BIN, KEYWATCH_BIN,
+  WHISPER_MODELS, LLM_MODELS, DEFAULT_WHISPER, DEFAULT_LLM,
+  whisperPath, whisperUrl, llmModel, type SetupStep,
+} from './setup';
 import { spawn } from 'node:child_process';
 
 const PORT = Number(process.env.ASSEMBLE_PORT || 4817);
@@ -31,6 +35,9 @@ const llmRuntime = new LlmRuntime();
 const recorder = new Recorder({ binPath: AUDIOTAP_BIN });
 const agents = new AgentRunner();
 const linearKey = () => kvGet(db, 'linear_api_key') || process.env.LINEAR_API_KEY || '';
+const selectedWhisper = () => kvGet(db, 'whisper_model') || DEFAULT_WHISPER;
+const selectedLlm = () => kvGet(db, 'llm_model') || DEFAULT_LLM;
+const activeWhisperPath = () => whisperPath(selectedWhisper());
 
 // ---- slack tokens: UI-saved (kv) wins over .env ----
 const slackTokens = () => ({
@@ -70,7 +77,7 @@ app.get('/health', async c => c.json({
 app.get('/setup/status', async c => {
   const { appToken, botToken } = slackTokens();
   return c.json({
-    ...toolStatus(),
+    ...toolStatus(activeWhisperPath()),
     llmRunning: await llmReady(),
     slackConfigured: Boolean(appToken && botToken),
     slackConnected,
@@ -78,6 +85,24 @@ app.get('/setup/status', async c => {
     claudeCli: Bun.which('claude') !== null,
     steps: SETUP_STEPS,
   });
+});
+
+app.get('/setup/models', c => c.json({
+  whisper: { options: WHISPER_MODELS, selected: selectedWhisper() },
+  llm: { options: LLM_MODELS, selected: selectedLlm() },
+}));
+
+app.post('/setup/models', async c => {
+  const { whisper, llm: llmId } = await c.req.json<{ whisper?: string; llm?: string }>();
+  if (whisper && WHISPER_MODELS.some(m => m.id === whisper)) kvSet(db, 'whisper_model', whisper);
+  if (llmId && LLM_MODELS.some(m => m.id === llmId)) {
+    kvSet(db, 'llm_model', llmId);
+    if (llmRuntime.running) {
+      llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(llmId).hf);
+      llmCheckedAt = 0;
+    }
+  }
+  return c.json({ whisper: selectedWhisper(), llm: selectedLlm() });
 });
 
 let setupRunning = false;
@@ -88,7 +113,7 @@ app.post('/setup/run', async c => {
   setupRunning = true;
   try {
     if (step === 'llm-start') {
-      llmRuntime.start(emit);
+      llmRuntime.start(emit, llmModel(selectedLlm()).hf);
       kvSet(db, 'llm_enabled', '1');
       // wait for health (model may be downloading — poll up to 30 min)
       const deadline = Date.now() + 30 * 60_000;
@@ -100,7 +125,10 @@ app.post('/setup/run', async c => {
       llmCheckedAt = 0;
       if (!(await llmReady())) throw new Error('llm did not become healthy');
     } else {
-      await runSetupStep(step, emit);
+      await runSetupStep(step, emit, {
+        whisperModelPath: activeWhisperPath(),
+        whisperModelUrl: whisperUrl(selectedWhisper()),
+      });
     }
     broadcast({ kind: 'setup-progress', step, done: true });
     return c.json({ ok: true });
@@ -229,7 +257,7 @@ async function stopRecording(c: any) {
 
 async function processRecording(id: number, wavPath: string) {
   try {
-    const transcript = await transcribe(wavPath, { modelPath: WHISPER_MODEL_PATH });
+    const transcript = await transcribe(wavPath, { modelPath: activeWhisperPath() });
     updateRecording(db, id, { transcript });
     let summary: string | null = null;
     if (await llmReady()) summary = await summarizeCall(llm, transcript);
@@ -300,7 +328,7 @@ app.post('/voice', async c => {
 
   let transcript: string;
   try {
-    transcript = await transcribe(wavPath, { modelPath: WHISPER_MODEL_PATH });
+    transcript = await transcribe(wavPath, { modelPath: activeWhisperPath() });
   } catch (err) {
     return c.json({ error: `transcription failed: ${(err as Error).message} — open Setup` }, 503);
   }
@@ -419,7 +447,7 @@ void restartSlack();
 
 // resume the local LLM if the user enabled it before
 if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
-  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }));
+  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf);
 }
 
 // global double-space hotkey (listen-only event tap; needs Input Monitoring)

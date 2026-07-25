@@ -311,6 +311,22 @@ button { font: inherit; color: inherit; }
   border-radius: 7px; padding: 8px; font: 13px Menlo, monospace; width: 100%;
 }
 
+/* ---------- model selectors ---------- */
+.model-selectors { display: flex; flex-direction: column; gap: 14px; width: 100%; text-align: left; }
+.model-select {
+  background: color-mix(in srgb, var(--panel) 70%, transparent);
+  border: 1px solid var(--line); border-radius: 12px; padding: 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.model-head { display: flex; flex-direction: column; gap: 2px; }
+.model-dd {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font: inherit; max-width: 420px;
+}
+.model-info { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 12.5px; color: var(--dim); }
+.model-info b { color: var(--ink); font-weight: 600; margin-right: 4px; }
+.model-info .hint { flex-basis: 100%; }
+
 /* ---------- settings tabs ---------- */
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
 .tab {

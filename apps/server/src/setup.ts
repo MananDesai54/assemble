@@ -13,20 +13,93 @@ export interface SetupStatus {
   slackConnected: boolean;
 }
 
-// large-v3-turbo: near-medium speed, much better Hindi/Gujarati than medium.
-export const WHISPER_MODEL_PATH = 'models/ggml-large-v3-turbo.bin';
-export const WHISPER_MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin';
+export interface WhisperModel {
+  id: string;
+  label: string;
+  file: string;
+  size: string;
+  speed: string;
+  quality: string;
+  notes: string;
+}
+
+export const WHISPER_MODELS: WhisperModel[] = [
+  {
+    id: 'small', label: 'Whisper small', file: 'ggml-small.bin',
+    size: '0.5 GB', speed: 'Fastest (~10× realtime)',
+    quality: 'Good English · fair Hindi',
+    notes: 'Snappiest voice commands; long Hindi calls will have more errors.',
+  },
+  {
+    id: 'large-v3-turbo', label: 'Whisper large-v3-turbo (recommended)', file: 'ggml-large-v3-turbo.bin',
+    size: '1.6 GB', speed: 'Fast (~6× realtime)',
+    quality: 'Great English · strong Hindi/Hinglish',
+    notes: 'Best balance of speed and accuracy for mixed-language use.',
+  },
+  {
+    id: 'large-v3', label: 'Whisper large-v3', file: 'ggml-large-v3.bin',
+    size: '2.9 GB', speed: '~2× slower than turbo',
+    quality: 'Maximum accuracy, all languages',
+    notes: 'For long, important calls and heavy accents. Transcription takes noticeably longer.',
+  },
+];
+export const DEFAULT_WHISPER = 'large-v3-turbo';
+export const whisperModel = (id: string): WhisperModel =>
+  WHISPER_MODELS.find(m => m.id === id) ?? WHISPER_MODELS.find(m => m.id === DEFAULT_WHISPER)!;
+export const whisperPath = (id: string): string => `models/${whisperModel(id).file}`;
+export const whisperUrl = (id: string): string =>
+  `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${whisperModel(id).file}`;
+
+export interface LlmModel {
+  id: string;
+  label: string;
+  hf: string;
+  size: string;
+  ram: string;
+  strengths: string;
+  notes: string;
+}
+
+export const LLM_MODELS: LlmModel[] = [
+  {
+    id: 'gemma-4-e4b', label: 'Gemma 4 E4B — light', hf: 'unsloth/gemma-4-E4B-it-GGUF:Q4_K_M',
+    size: '~3 GB download', ram: '8 GB+',
+    strengths: 'Fast responses, low memory. Decent Hindi/Hinglish.',
+    notes: 'Pick on 8–16 GB Macs or if 12B feels slow. Summaries and drafts are simpler.',
+  },
+  {
+    id: 'gemma-4-12b', label: 'Gemma 4 12B (recommended)', hf: 'unsloth/gemma-4-12b-it-GGUF:Q4_K_M',
+    size: '~7 GB download', ram: '16 GB+',
+    strengths: 'Strong multilingual (Hindi/Hinglish), good drafts + summaries, balanced speed.',
+    notes: 'The default. Best all-rounder for Slack triage, digests, call summaries.',
+  },
+  {
+    id: 'gemma-4-26b-a4b', label: 'Gemma 4 26B-A4B — big MoE', hf: 'unsloth/gemma-4-26B-A4B-it-GGUF:Q4_K_M',
+    size: '~15 GB download', ram: '24 GB+',
+    strengths: 'Noticeably smarter drafts/summaries; MoE keeps it fast (only 4B active per token).',
+    notes: 'Pick on 24–32 GB Macs when quality matters more than disk space.',
+  },
+  {
+    id: 'gpt-oss-20b', label: 'gpt-oss-20b — OpenAI open-weight', hf: 'ggml-org/gpt-oss-20b-GGUF',
+    size: '~12 GB download', ram: '16–24 GB',
+    strengths: 'Strongest reasoning and agent-style tasks. English-first.',
+    notes: 'Hindi/Hinglish weaker than Gemma. Pick if your Slack/calls are mostly English and you want the sharpest summaries.',
+  },
+];
+export const DEFAULT_LLM = 'gemma-4-12b';
+export const llmModel = (id: string): LlmModel =>
+  LLM_MODELS.find(m => m.id === id) ?? LLM_MODELS.find(m => m.id === DEFAULT_LLM)!;
 export const AUDIOTAP_BIN = 'native/audiotap/audiotap';
 export const KEYWATCH_BIN = 'native/keywatch/keywatch';
 
 const has = (bin: string) => Bun.which(bin) !== null;
 
-export function toolStatus(): Omit<SetupStatus, 'llmRunning' | 'slackConfigured' | 'slackConnected'> {
+export function toolStatus(whisperModelPath: string): Omit<SetupStatus, 'llmRunning' | 'slackConfigured' | 'slackConnected'> {
   return {
     brew: has('brew'),
     llamaCpp: has('llama-server'),
     whisperCpp: has('whisper-cli'),
-    whisperModel: existsSync(WHISPER_MODEL_PATH) && statSync(WHISPER_MODEL_PATH).size > 1_000_000_000,
+    whisperModel: existsSync(whisperModelPath) && statSync(whisperModelPath).size > 300_000_000,
     audiotap: existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN),
     swiftc: has('swiftc'),
   };
@@ -70,7 +143,11 @@ async function downloadWithProgress(url: string, dest: string, onLine: (l: strin
   onLine('download complete');
 }
 
-export async function runSetupStep(step: SetupStep, onLine: (l: string) => void): Promise<void> {
+export async function runSetupStep(
+  step: SetupStep,
+  onLine: (l: string) => void,
+  { whisperModelPath, whisperModelUrl }: { whisperModelPath: string; whisperModelUrl: string },
+): Promise<void> {
   switch (step) {
     case 'llama.cpp':
       if (has('llama-server')) { onLine('already installed'); return; }
@@ -83,9 +160,9 @@ export async function runSetupStep(step: SetupStep, onLine: (l: string) => void)
       onLine('brew install whisper-cpp…');
       return streamCmd('brew', ['install', 'whisper-cpp'], onLine);
     case 'whisper-model':
-      if (toolStatus().whisperModel) { onLine('already downloaded'); return; }
-      onLine('whisper large-v3-turbo model (~1.6 GB, multilingual)…');
-      return downloadWithProgress(WHISPER_MODEL_URL, WHISPER_MODEL_PATH, onLine);
+      if (toolStatus(whisperModelPath).whisperModel) { onLine('already downloaded'); return; }
+      onLine('downloading speech model…');
+      return downloadWithProgress(whisperModelUrl, whisperModelPath, onLine);
     case 'audiotap': {
       if (existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN)) { onLine('already built'); return; }
       if (!has('swiftc')) throw new Error('Xcode Command Line Tools required — run: xcode-select --install');
