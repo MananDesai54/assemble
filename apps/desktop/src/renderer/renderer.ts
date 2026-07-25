@@ -536,6 +536,27 @@ function renderMain() {
         <ul id="rec-list"></ul>
       </div>
       <div class="activity">
+        <h2>Work <span id="work-status" class="pane-status"></span></h2>
+        <div class="work-form">
+          <div class="work-row">
+            <input id="work-dir" list="work-dirs" placeholder="~/midgard/…  (working directory)" />
+            <datalist id="work-dirs"></datalist>
+          </div>
+          <textarea id="work-prompt" rows="2" placeholder="What should Claude Code do?"></textarea>
+          <div class="work-row">
+            <label class="switch"><input type="checkbox" id="work-skip" />
+              <span>Skip permission prompts (Claude can run anything in that repo)</span></label>
+            <span class="spacer"></span>
+            <button class="secondary" id="work-run">Run Claude Code</button>
+          </div>
+        </div>
+        <ul id="work-list"></ul>
+      </div>
+      <div class="activity">
+        <h2>Linear <span id="linear-status" class="pane-status"></span></h2>
+        <ul id="linear-list"></ul>
+      </div>
+      <div class="activity">
         <h2>Activity</h2>
         <ul id="log"></ul>
       </div>
@@ -593,8 +614,114 @@ function renderMain() {
   $('#draft-again').onclick = redraft;
   $('#setup-btn').onclick = () => goto('power');
   $('#rec-btn').onclick = toggleRecording;
+  $('#work-run').onclick = runAgent;
   connectSlackFeed();
   void refreshRecordings();
+  void refreshWork();
+  void refreshLinear();
+}
+
+/* ================= work (claude code sessions) ================= */
+
+interface AgentSession {
+  id: number; cwd: string; prompt: string; status: string;
+  output: string | null; created_at: string;
+}
+
+async function refreshWork() {
+  try {
+    const dirs: string[] = await (await fetch(`${SERVER}/agent/dirs`)).json();
+    const dl = $('#work-dirs');
+    if (dl) dl.innerHTML = dirs.map(d => `<option value="${d}"></option>`).join('');
+    const dirInput = $('#work-dir');
+    if (dirInput && !dirInput.value) dirInput.value = dirs[0] ?? '~/midgard';
+    const rows: AgentSession[] = await (await fetch(`${SERVER}/agent/sessions?limit=8`)).json();
+    const list = $('#work-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const s of rows) {
+      const li = document.createElement('li');
+      li.className = 'rec-item';
+      const when = new Date(s.created_at + 'Z').toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const icon = s.status === 'running' ? '◌' : s.status === 'done' ? '✓' : s.status === 'stopped' ? '■' : '✗';
+      li.textContent = `${when} ${icon} ${s.cwd.split('/').slice(-2).join('/')} · ${s.prompt.slice(0, 60)}`;
+      li.style.cursor = 'pointer';
+      li.onclick = async () => {
+        const open = li.querySelector('.rec-detail');
+        if (open) { open.remove(); return; }
+        const d = document.createElement('div');
+        d.className = 'rec-detail';
+        if (s.status === 'running') {
+          const stop = document.createElement('button');
+          stop.className = 'secondary';
+          stop.textContent = 'Stop session';
+          stop.onclick = async e => {
+            e.stopPropagation();
+            await fetch(`${SERVER}/agent/stop`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: s.id }),
+            });
+          };
+          d.append('running…  ', stop);
+        } else {
+          const full: AgentSession = await (await fetch(`${SERVER}/agent/sessions/${s.id}`)).json();
+          d.textContent = full.output || '(no output)';
+        }
+        li.appendChild(d);
+      };
+      list.appendChild(li);
+    }
+  } catch { /* server offline */ }
+}
+
+async function runAgent() {
+  const cwd = $('#work-dir').value.trim();
+  const prompt = $('#work-prompt').value.trim();
+  const status = $('#work-status');
+  if (!cwd || !prompt) { status.textContent = 'directory + prompt required'; return; }
+  status.textContent = 'starting…';
+  try {
+    const r = await fetch(`${SERVER}/agent/run`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd, prompt, skipPermissions: $('#work-skip').checked }),
+    });
+    const data = await r.json();
+    status.textContent = r.ok ? '' : data.error;
+    if (r.ok) { $('#work-prompt').value = ''; void refreshWork(); }
+  } catch {
+    status.textContent = 'server offline';
+  }
+}
+
+/* ================= linear ================= */
+
+interface LinearIssueUi { identifier: string; title: string; state: string; url: string; description: string | null }
+
+async function refreshLinear() {
+  const status = $('#linear-status');
+  try {
+    const r = await fetch(`${SERVER}/linear/issues`);
+    const data = await r.json();
+    if (!r.ok) { if (status) status.textContent = data.error; return; }
+    if (status) status.textContent = '';
+    const list = $('#linear-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const issue of data as LinearIssueUi[]) {
+      const li = document.createElement('li');
+      li.className = 'rec-item';
+      li.textContent = `${issue.identifier} · ${issue.state} · ${issue.title}`;
+      li.style.cursor = 'pointer';
+      li.title = 'Click to prefill a Claude Code session for this issue';
+      li.onclick = () => {
+        $('#work-prompt').value =
+          `Work on Linear issue ${issue.identifier}: ${issue.title}.\n${(issue.description ?? '').slice(0, 500)}`;
+        $('#work-prompt').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        $('#work-prompt').focus();
+      };
+      list.appendChild(li);
+    }
+  } catch { /* server offline */ }
 }
 
 /* ================= calls (recording) ================= */
@@ -783,6 +910,10 @@ function openWs() {
     if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
     if (payload.kind === 'setup-progress') setupProgressLine(payload);
     if (payload.kind === 'recording') void onRecordingEvent(payload);
+    if (payload.kind === 'agent') {
+      if (payload.state !== 'running') toast(`Claude Code session #${payload.id}: ${payload.state}`);
+      void refreshWork();
+    }
   };
   slackWs.onclose = () => { slackWs = null; scheduleSlackRetry(); };
 }
@@ -822,14 +953,39 @@ function renderPower() {
         <button class="secondary" id="slack-connect">Connect Slack</button>
         <span id="slack-setup-status" class="lede" style="font-size:13px;"></span>
       </div>
+      <div class="setup-inputs">
+        <b>Linear (optional)</b>
+        <span class="lede" style="font-size:13px;">Personal API key from linear.app → Settings → API. Shows your issues, one click sends them to Claude Code.</span>
+        <input id="linear-key" type="password" placeholder="lin_api_…" />
+        <button class="secondary" id="linear-connect">Connect Linear</button>
+        <span id="linear-setup-status" class="lede" style="font-size:13px;"></span>
+      </div>
       <p class="lede" style="font-size:12.5px;">Call recording asks for Screen Recording + Microphone permission on first use. A notification fires whenever recording starts — tell the people on the call.</p>
       <button class="secondary" id="power-done">Done</button>
     </div>`;
   void refreshSetupStatus();
   $('#install-all').onclick = installEverything;
   $('#slack-connect').onclick = connectSlackTokens;
+  $('#linear-connect').onclick = connectLinearKey;
   $('#power-done').onclick = () => goto('main');
   openWs();
+}
+
+async function connectLinearKey() {
+  const apiKey = $('#linear-key').value.trim();
+  const status = $('#linear-setup-status');
+  if (!apiKey) { status.textContent = 'Paste a lin_api_ key.'; return; }
+  status.textContent = 'Checking…';
+  try {
+    const r = await fetch(`${SERVER}/setup/linear`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    const data = await r.json();
+    status.textContent = data.connected ? `Connected — ${data.count} open issues.` : `Failed: ${data.error}`;
+  } catch {
+    status.textContent = 'Local server unreachable.';
+  }
 }
 
 async function refreshSetupStatus(): Promise<Record<string, boolean>> {

@@ -157,6 +157,18 @@ whisper transcribes locally, Gemma maps it to a closed set of safe intents:
 Deliberately **no arbitrary shell from voice** — a misheard sentence must never execute
 a command you didn't choose. Unknown requests are ignored and shown as "no match".
 
+### Work — Linear + Claude Code
+
+Connect Linear in Setup (personal API key) and your open issues appear in the **Linear**
+pane. Click one → it prefills a **Claude Code** session; pick the working directory
+(recent dirs remembered, e.g. `~/midgard/api`), hit Run. Sessions run headless
+(`claude -p`), show live status, and store their output — click a session to read it,
+stop it mid-run if needed. Up to 3 concurrent.
+
+Permission model: sessions default to `acceptEdits` (Claude can edit files in that repo
+but not run arbitrary commands). The "Skip permission prompts" toggle hands the session
+full autonomy in that directory — per run, never sticky.
+
 ### Call recording
 
 **● Record** in the Calls pane — or assign the "Record call (start/stop)" preset to any

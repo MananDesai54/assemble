@@ -11,7 +11,10 @@ import {
   messagesAfter, channelMessages, lastMessageId, kvGet, kvSet,
   insertRecording, updateRecording, listRecordings, getRecording,
 } from './db';
+import { myIssues } from '@assemble/linear';
 import { startSlack, type SlackIntake } from './slack';
+import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
+import { existsSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LlmRuntime } from './llm-runtime';
@@ -21,9 +24,12 @@ const PORT = Number(process.env.ASSEMBLE_PORT || 4817);
 const DB_PATH = process.env.ASSEMBLE_DB || 'data/assemble.db';
 
 const db = openDb(DB_PATH);
+initAgentTables(db);
 const llm = new Llm();
 const llmRuntime = new LlmRuntime();
 const recorder = new Recorder({ binPath: AUDIOTAP_BIN });
+const agents = new AgentRunner();
+const linearKey = () => kvGet(db, 'linear_api_key') || process.env.LINEAR_API_KEY || '';
 
 // ---- slack tokens: UI-saved (kv) wins over .env ----
 const slackTokens = () => ({
@@ -67,6 +73,8 @@ app.get('/setup/status', async c => {
     llmRunning: await llmReady(),
     slackConfigured: Boolean(appToken && botToken),
     slackConnected,
+    linearConfigured: Boolean(linearKey()),
+    claudeCli: Bun.which('claude') !== null,
     steps: SETUP_STEPS,
   });
 });
@@ -101,6 +109,17 @@ app.post('/setup/run', async c => {
     return c.json({ error: message }, 500);
   } finally {
     setupRunning = false;
+  }
+});
+
+app.post('/setup/linear', async c => {
+  const { apiKey } = await c.req.json<{ apiKey?: string }>();
+  if (apiKey) kvSet(db, 'linear_api_key', apiKey.trim());
+  try {
+    const issues = await myIssues(linearKey());
+    return c.json({ connected: true, count: issues.length });
+  } catch (err) {
+    return c.json({ connected: false, error: (err as Error).message });
   }
 });
 
@@ -213,6 +232,52 @@ async function processRecording(id: number, wavPath: string) {
     console.error('recording pipeline failed:', (err as Error).message);
   }
 }
+
+/* ================= linear ================= */
+
+app.get('/linear/issues', async c => {
+  const key = linearKey();
+  if (!key) return c.json({ error: 'Linear not connected — open Setup' }, 503);
+  try {
+    return c.json(await myIssues(key));
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 502);
+  }
+});
+
+/* ================= claude code sessions ================= */
+
+app.get('/agent/sessions', c => c.json(listSessions(db, Math.min(50, Number(c.req.query('limit') || 20)))));
+app.get('/agent/sessions/:id', c => {
+  const row = getSession(db, Number(c.req.param('id')));
+  return row ? c.json(row) : c.json({ error: 'not found' }, 404);
+});
+
+app.get('/agent/dirs', c => {
+  const dirs: string[] = JSON.parse(kvGet(db, 'work_dirs') || '[]');
+  return c.json(dirs.filter(d => existsSync(expandDir(d))));
+});
+
+app.post('/agent/run', async c => {
+  const { cwd, prompt, skipPermissions } = await c.req.json<{ cwd: string; prompt: string; skipPermissions?: boolean }>();
+  if (!cwd || !prompt?.trim()) return c.json({ error: 'cwd and prompt required' }, 400);
+  try {
+    const id = agents.run(db, { cwd, prompt: prompt.trim(), skipPermissions },
+      p => broadcast({ kind: 'agent', ...p }));
+    const dirs: string[] = JSON.parse(kvGet(db, 'work_dirs') || '[]');
+    kvSet(db, 'work_dirs', JSON.stringify([cwd, ...dirs.filter(d => d !== cwd)].slice(0, 8)));
+    return c.json({ ok: true, id });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
+});
+
+app.post('/agent/stop', async c => {
+  const { id } = await c.req.json<{ id: number }>();
+  const stopped = agents.stop(db, id);
+  if (stopped) broadcast({ kind: 'agent', id, state: 'stopped' });
+  return c.json({ ok: stopped });
+});
 
 /* ================= voice commands ================= */
 

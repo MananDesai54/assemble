@@ -10,6 +10,7 @@
   "dependencies": {
     "@assemble/actions": "workspace:*",
     "@assemble/core": "workspace:*",
+    "@assemble/linear": "workspace:*",
     "@assemble/llm": "workspace:*",
     "@assemble/stt": "workspace:*",
     "@slack/socket-mode": "^2.0.0",

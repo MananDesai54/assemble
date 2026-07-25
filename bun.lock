@@ -30,6 +30,7 @@
       "dependencies": {
         "@assemble/actions": "workspace:*",
         "@assemble/core": "workspace:*",
+        "@assemble/linear": "workspace:*",
         "@assemble/llm": "workspace:*",
         "@assemble/stt": "workspace:*",
         "@slack/socket-mode": "^2.0.0",
@@ -55,6 +56,10 @@
         "@assemble/core": "workspace:*",
       },
     },
+    "packages/linear": {
+      "name": "@assemble/linear",
+      "version": "0.1.0",
+    },
     "packages/llm": {
       "name": "@assemble/llm",
       "version": "0.1.0",
@@ -72,6 +77,8 @@
     "@assemble/desktop": ["@assemble/desktop@workspace:apps/desktop"],
 
     "@assemble/dsp": ["@assemble/dsp@workspace:packages/dsp"],
+
+    "@assemble/linear": ["@assemble/linear@workspace:packages/linear"],
 
     "@assemble/llm": ["@assemble/llm@workspace:packages/llm"],
 
