@@ -11,8 +11,8 @@ export interface SetupStatus {
   audiotap: boolean;
   swiftc: boolean;
   llmRunning: boolean;
-  slackConfigured: boolean;
-  slackConnected: boolean;
+  claudeCli: boolean;
+  steps: SetupStep[];
 }
 
 export interface WhisperModel {
@@ -96,7 +96,7 @@ export const KEYWATCH_BIN = join(BIN_DIR, 'keywatch');
 
 const has = (bin: string) => Bun.which(bin) !== null;
 
-export function toolStatus(whisperModelPath: string): Omit<SetupStatus, 'llmRunning' | 'slackConfigured' | 'slackConnected'> {
+export function toolStatus(whisperModelPath: string): Omit<SetupStatus, 'llmRunning' | 'claudeCli' | 'steps'> {
   return {
     brew: has('brew'),
     llamaCpp: has('llama-server'),

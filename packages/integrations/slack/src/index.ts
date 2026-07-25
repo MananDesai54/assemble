@@ -13,6 +13,7 @@ export * from './intake';
 export * from './store';
 
 let intake: SlackIntake | null = null;
+let startGen = 0;
 
 const tokens = (ctx: IntegrationContext) => ({
   appToken: ctx.kv.get('slack_app_token') || process.env.SLACK_APP_TOKEN || '',
@@ -70,7 +71,8 @@ export const slackIntegration: IntegrationManifest = {
     if (!appToken || !botToken) throw new Error('Slack tokens missing');
     const db = ctx.db as Database;
     ensureSlackTables(db);
-    intake = await startSlack({
+    const gen = ++startGen;
+    const fresh = await startSlack({
       appToken, botToken,
       onMessage: m => {
         const id = insertMessage(db, m);
@@ -80,10 +82,17 @@ export const slackIntegration: IntegrationManifest = {
         void scoreInBackground(ctx, id, m);
       },
     });
+    if (gen !== startGen || intake) {
+      // a newer start() won the race (or one already landed) — discard this socket
+      await fresh.stop().catch(() => {});
+      return;
+    }
+    intake = fresh;
     ctx.broadcast({ kind: 'slack-connected' });
   },
 
   async stop() {
+    startGen++;
     if (intake) { await intake.stop().catch(() => {}); intake = null; }
   },
 

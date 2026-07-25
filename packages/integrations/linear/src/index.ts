@@ -16,14 +16,7 @@ export const linearIntegration: IntegrationManifest = {
   ],
 
   async status(ctx) {
-    const key = apiKey(ctx);
-    if (!key) return { connected: false };
-    try {
-      const issues = await myIssues(key);
-      return { connected: true, detail: `${issues.length} open issues` };
-    } catch (err) {
-      return { connected: false, detail: (err as Error).message };
-    }
+    return apiKey(ctx) ? { connected: true } : { connected: false };
   },
 
   // Pull-based: nothing runs in the background. start() just validates the key.

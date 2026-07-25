@@ -23,6 +23,12 @@ describe('linear manifest', () => {
     expect(s.connected).toBe(false);
   });
 
+  it('status with a key present returns connected without any network call', async () => {
+    delete process.env.LINEAR_API_KEY;
+    const s = await linearIntegration.status(ctx('lin_api_test'));
+    expect(s.connected).toBe(true);
+  });
+
   it('start throws without a key', async () => {
     delete process.env.LINEAR_API_KEY;
     await expect(linearIntegration.start(ctx(null))).rejects.toThrow('Linear key missing');

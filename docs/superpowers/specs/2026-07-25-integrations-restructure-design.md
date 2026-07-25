@@ -57,8 +57,8 @@ export interface IntegrationStatus {
 export interface IntegrationContext {
   kv: { get(key: string): string | null; set(key: string, v: string): void; del(key: string): void };
   db: unknown;                          // concrete Database passed by server
-  broadcast(kind: string, payload: unknown): void;
-  llm(): unknown | null;                // current Llm instance or null
+  broadcast(payload: unknown): void;
+  llm(): Promise<unknown | null>;       // current Llm instance or null
   notify(title: string, body: string): void;
 }
 
@@ -71,11 +71,11 @@ export interface IntegrationManifest {
   status(ctx: IntegrationContext): Promise<IntegrationStatus>;
   start(ctx: IntegrationContext): Promise<void>;   // called on connect + on boot if connected
   stop(): Promise<void>;
-  registerRoutes(app: unknown, ctx: IntegrationContext): void; // Hono sub-routes
+  routes(ctx: IntegrationContext): unknown;        // Hono sub-app, mounted at /integrations/<id>
 }
 ```
 
-`db`/`llm`/`app` are typed loosely in core to keep core dependency-free;
+`db`/`llm` are typed loosely in core to keep core dependency-free;
 integrations narrow them.
 
 ## Server
@@ -99,9 +99,10 @@ integrations narrow them.
 - Nav = fixed core pages (Desk, Calls, Work, Activity, Settings) + one entry per
   **connected** integration from `GET /integrations`, refreshed on WS
   `integration-changed` events.
-- Integration pages are client-side modules keyed by id:
-  `renderer/pages/slack.ts`, `renderer/pages/linear.ts`, registered in a map
-  `{ [id]: renderPage }`. Connected but unknown id → generic "no UI" card.
+- Integration pages are modules in `renderer.ts` keyed by id in
+  `INTEGRATION_PAGES`. Integrations without a page get no nav entry — e.g.
+  linear has no page module; its UI is the gated pane inside Work, not a
+  standalone "no UI" card.
 - Work page stays core (Claude Code sessions); its Linear issue list renders
   only when linear is connected.
 - Settings → **Integrations** tab: catalog cards built from `GET /integrations`

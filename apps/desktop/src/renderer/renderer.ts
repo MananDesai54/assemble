@@ -1149,24 +1149,34 @@ async function renderIntegrationsCatalog(container: HTMLElement) {
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="secondary int-connect">${info.connected ? 'Reconnect' : 'Connect'}</button>
         ${info.connected ? '<button class="quiet-link int-disconnect">Disconnect</button>' : ''}
-        <span class="hint int-status">${info.connected ? `Connected${info.detail ? ` — ${info.detail}` : ''}.` : (info.detail ?? '')}</span>
+        <span class="hint int-status"></span>
       </div>`;
     const status = card.querySelector('.int-status') as HTMLElement;
-    (card.querySelector('.int-connect') as HTMLElement).onclick = async () => {
+    status.textContent = info.connected ? `Connected${info.detail ? ` — ${info.detail}` : ''}.` : (info.detail ?? '');
+    const connectBtn = card.querySelector('.int-connect') as HTMLButtonElement;
+    connectBtn.onclick = async () => {
       const values: Record<string, string> = {};
       card.querySelectorAll('input[data-key]').forEach(el => {
         const input = el as HTMLInputElement;
         if (input.value.trim()) values[input.dataset.key!] = input.value.trim();
       });
       status.textContent = 'Connecting…';
+      connectBtn.disabled = true;
+      const prevLabel = connectBtn.textContent;
+      connectBtn.textContent = 'Connecting…';
       try {
         const r = await fetch(`${SERVER}/integrations/${info.id}/connect`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values),
         });
         const data = await r.json();
         status.textContent = r.ok ? `Connected${data.detail ? ` — ${data.detail}` : ''}.` : `Failed: ${data.error}`;
-        if (r.ok) { await fetchIntegrations(); if (state.mode === 'app') renderApp(); }
+        if (r.ok) {
+          await fetchIntegrations();
+          if (state.mode === 'app') renderApp();
+          else void renderIntegrationsCatalog(container);
+        }
       } catch { status.textContent = 'Local server unreachable.'; }
+      finally { connectBtn.disabled = false; connectBtn.textContent = prevLabel; }
     };
     const disc = card.querySelector('.int-disconnect') as HTMLElement | null;
     if (disc) disc.onclick = async () => {
