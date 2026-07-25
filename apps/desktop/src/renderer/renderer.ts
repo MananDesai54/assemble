@@ -1289,7 +1289,7 @@ function connectSlackFeed() {
 
 function scheduleSlackRetry() {
   if (slackRetry) clearTimeout(slackRetry);
-  slackRetry = setTimeout(() => { if (state.page === 'work' && integrationById('slack')?.connected) connectSlackFeed(); else openWs(); }, 30_000);
+  slackRetry = setTimeout(() => { if (state.page === 'work' && integrationById('slack')?.connected) connectSlackFeed(); else openWs(); }, 5_000);
 }
 
 // One WebSocket for everything the server pushes; handlers are null-safe so
@@ -1297,6 +1297,15 @@ function scheduleSlackRetry() {
 function openWs() {
   if (slackWs && slackWs.readyState <= WebSocket.OPEN) return;
   slackWs = new WebSocket('ws://127.0.0.1:4817/ws');
+  // The server may have booted (and connected integrations) after our first
+  // status fetch — every successful WS open re-syncs integration state.
+  slackWs.onopen = () => {
+    const before = JSON.stringify(state.integrations.map(i => [i.id, i.connected]));
+    void fetchIntegrations().then(() => {
+      const after = JSON.stringify(state.integrations.map(i => [i.id, i.connected]));
+      if (before !== after && state.mode === 'app') renderApp(); // only if something actually changed
+    });
+  };
   slackWs.onmessage = e => {
     const payload = JSON.parse(e.data);
     if (payload.kind === 'slack-message') slackLine(payload.message);

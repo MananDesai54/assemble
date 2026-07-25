@@ -93,9 +93,9 @@ export async function startSlack({
   userToken,
   onMessage,
   log = console.log,
-  pollMs = 10_000,
-  fullSweepEvery = 6,
-  hotWindowMs = 30 * 60_000,
+  pollMs = 2_000,
+  fullSweepEvery = 30,
+  hotWindowMs = 10 * 60_000,
 }: {
   userToken: string;
   onMessage: (m: EnrichedMessage) => void;
@@ -183,8 +183,8 @@ export async function startSlack({
       tick++;
       const full = tick === 1 || tick % fullSweepEvery === 0;
       if (tick % (fullSweepEvery * 10) === 0) convos = await listConversations(web).catch(() => convos);
-      // fast ticks hit only hot conversations (DMs + recently active), so the
-      // 10s cadence stays well inside Slack's rate limits
+      // fast ticks hit only hot conversations (DMs + recently active); if the
+      // hot set ever grows large the SDK queues on 429 rather than failing
       const targets = full ? convos : convos.filter(isHot);
       for (const c of targets) {
         if (stopped) break;
