@@ -1,8 +1,11 @@
 # assemble ◉
 
-**Your desk is the keyboard.** Four corners of your desk become four programmable buttons — no extra hardware, just the microphone.
+**Your desk is the input device.** Tap corners, knock rhythms, whistle, blow, wave — assemble turns everyday physical gestures into programmable actions. No extra hardware: the microphone does most of it, the camera (optional, local-only) does the rest.
 
-Tap a corner. The app hears it, figures out *which* corner, runs whatever you assigned there.
+- **Tap a corner** of the desk → its action runs. Four corners × three rhythms (1×, 2×, 3× knocks) = up to twelve buttons.
+- **Whistle** and slide the pitch up/down → system volume follows, like an invisible knob.
+- **Blow at the mic** → one more trigger (classic: sleep the display).
+- **Wave a hand** left or right of the screen → two more, via low-res local motion detection.
 
 ![Main screen, dark theme](docs/screenshots/main-dark.png)
 
@@ -56,14 +59,20 @@ After the four corners: the **ignore** phase. For ten seconds, make every sound 
 
 ### 3. Assign actions
 
-Click a corner card:
+Click a corner card — each corner takes up to three actions, one per knock pattern (**1×**, **2×**, **3×**). Knocks in quick succession (< 0.6 s apart) count as one pattern, so two fast knocks fire the 2× action. Single-tap actions fire ~0.7 s after the tap (the app waits to see if more knocks follow).
 
 | Action | Value example | Notes |
 |---|---|---|
-| System action | screenshot (full / region), volume up/down, mute, lock screen | screenshots go to clipboard; needs Screen Recording permission |
+| System action | screenshot (full / region), volume up/down, mute, lock screen, sleep display | screenshots go to clipboard; needs Screen Recording permission |
 | Run a command | `say "hello"` | anything zsh runs |
 | Press a shortcut | `cmd+shift+4` | needs Accessibility permission (System Settings → Privacy & Security) |
 | Open app or link | `https://github.com` or `/Applications/Spotify.app` | |
+
+### More triggers (below the desk map)
+
+- **Whistle slides system volume** — sustain a whistle and bend the pitch up/down; each ~semitone step nudges the volume. Toggle it on, whistle a slide, watch the volume HUD.
+- **Blow at the mic** — half a second of sustained blowing fires its assigned action. Tuned to ignore taps (too short) and whistles/speech (too tonal).
+- **Hand waves (camera)** — off by default. When enabled, a 160×120 local motion check watches for a sustained wave on the left or right half of the frame; each side gets its own action. Frames are processed in memory and never stored or sent anywhere. First enable prompts for camera permission.
 
 ### 4. Daily use
 
@@ -84,11 +93,14 @@ Click a corner card:
 | Random fires | Slider right; re-teach with a longer, louder ignore phase |
 | "ignored a sound" for real taps | Re-teach — your tap now differs from the samples (mic moved, different knuckle) |
 | Meter dead | Wrong input device, or mic permission missing |
+| Double-tap fires 1× action | Knock faster — gaps over 0.6 s split the pattern |
+| Whistle does nothing | Enable the toggle; whistle steadily first, then bend the pitch |
+| Waves don't register | Wave one hand at one side only — motion on both halves is ignored (someone walking by shouldn't trigger it) |
 
 ## Development
 
 ```bash
-npm test   # 24 unit tests (detector, fingerprint, classifier, actions, config)
+npm test   # 46 unit tests (detector, fingerprint, classifier, rhythm, pitch/whistle, blow, motion, actions, config)
 ```
 
 Pure-DSP modules (`src/renderer/audio/`) have no Electron dependency — they run in Node under Vitest against synthesized tap fixtures.
