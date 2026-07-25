@@ -88,8 +88,7 @@ Click a corner card:
 ## Development
 
 ```bash
-npm test                          # 24 unit tests (detector, fingerprint, classifier, actions, config)
-ASSEMBLE_SCREEN=teach npm start   # jump straight to a screen: welcome | mic | teach | main
+npm test   # 24 unit tests (detector, fingerprint, classifier, actions, config)
 ```
 
 Pure-DSP modules (`src/renderer/audio/`) have no Electron dependency — they run in Node under Vitest against synthesized tap fixtures.
