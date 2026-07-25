@@ -1,5 +1,7 @@
 import { spawn } from 'node:child_process';
 import { createWriteStream, existsSync, statSync, mkdirSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import { MODELS_DIR, BIN_DIR } from './paths';
 
 export interface SetupStatus {
   brew: boolean;
@@ -46,7 +48,7 @@ export const WHISPER_MODELS: WhisperModel[] = [
 export const DEFAULT_WHISPER = 'large-v3-turbo';
 export const whisperModel = (id: string): WhisperModel =>
   WHISPER_MODELS.find(m => m.id === id) ?? WHISPER_MODELS.find(m => m.id === DEFAULT_WHISPER)!;
-export const whisperPath = (id: string): string => `models/${whisperModel(id).file}`;
+export const whisperPath = (id: string): string => join(MODELS_DIR, whisperModel(id).file);
 export const whisperUrl = (id: string): string =>
   `https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${whisperModel(id).file}`;
 
@@ -89,8 +91,8 @@ export const LLM_MODELS: LlmModel[] = [
 export const DEFAULT_LLM = 'gemma-4-12b';
 export const llmModel = (id: string): LlmModel =>
   LLM_MODELS.find(m => m.id === id) ?? LLM_MODELS.find(m => m.id === DEFAULT_LLM)!;
-export const AUDIOTAP_BIN = 'native/audiotap/audiotap';
-export const KEYWATCH_BIN = 'native/keywatch/keywatch';
+export const AUDIOTAP_BIN = join(BIN_DIR, 'audiotap');
+export const KEYWATCH_BIN = join(BIN_DIR, 'keywatch');
 
 const has = (bin: string) => Bun.which(bin) !== null;
 
@@ -120,7 +122,7 @@ function streamCmd(cmd: string, args: string[], onLine: (l: string) => void): Pr
 }
 
 async function downloadWithProgress(url: string, dest: string, onLine: (l: string) => void): Promise<void> {
-  mkdirSync('models', { recursive: true });
+  mkdirSync(MODELS_DIR, { recursive: true });
   const res = await fetch(url, { redirect: 'follow' });
   if (!res.ok || !res.body) throw new Error(`download failed: http ${res.status}`);
   const total = Number(res.headers.get('content-length') || 0);

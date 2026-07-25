@@ -24,15 +24,18 @@ import {
   whisperPath, whisperUrl, llmModel, type SetupStep,
 } from './setup';
 import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+import { DATA_DIR, RECORDINGS_DIR, VOICE_DIR, migrateRepoLocalStorage } from './paths';
 
 const PORT = Number(process.env.ASSEMBLE_PORT || 4817);
-const DB_PATH = process.env.ASSEMBLE_DB || 'data/assemble.db';
+const DB_PATH = process.env.ASSEMBLE_DB || join(DATA_DIR, 'assemble.db');
 
+migrateRepoLocalStorage();
 const db = openDb(DB_PATH);
 initAgentTables(db);
 const llm = new Llm();
 const llmRuntime = new LlmRuntime();
-const recorder = new Recorder({ binPath: AUDIOTAP_BIN });
+const recorder = new Recorder({ binPath: AUDIOTAP_BIN, dir: RECORDINGS_DIR });
 const agents = new AgentRunner();
 const linearKey = () => kvGet(db, 'linear_api_key') || process.env.LINEAR_API_KEY || '';
 const selectedWhisper = () => kvGet(db, 'whisper_model') || DEFAULT_WHISPER;
@@ -163,7 +166,7 @@ app.post('/setup/slack', async c => {
 app.post('/reset', async c => {
   if (recorder.active) { try { await recorder.stop(); } catch { /* best effort */ } }
   db.exec(`DELETE FROM messages; DELETE FROM recordings; DELETE FROM agent_sessions; DELETE FROM kv;`);
-  for (const dir of ['data/recordings', 'data/voice']) rmSync(dir, { recursive: true, force: true });
+  for (const dir of [RECORDINGS_DIR, VOICE_DIR]) rmSync(dir, { recursive: true, force: true });
   await restartSlack(); // tokens gone → intake stops
   broadcast({ kind: 'reset' });
   return c.json({ ok: true });
@@ -322,8 +325,8 @@ app.post('/agent/stop', async c => {
 app.post('/voice', async c => {
   const body = await c.req.arrayBuffer();
   if (body.byteLength < 1000) return c.json({ error: 'no audio' }, 400);
-  mkdirSync('data/voice', { recursive: true });
-  const wavPath = `data/voice/cmd-${Date.now()}.wav`;
+  mkdirSync(VOICE_DIR, { recursive: true });
+  const wavPath = join(VOICE_DIR, `cmd-${Date.now()}.wav`);
   writeFileSync(wavPath, Buffer.from(body));
 
   let transcript: string;
