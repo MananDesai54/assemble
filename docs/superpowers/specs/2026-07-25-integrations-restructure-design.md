@@ -1,7 +1,7 @@
 # Integrations restructure — design
 
 **Date:** 2026-07-25
-**Status:** approved (brainstorm)
+**Status:** implemented
 
 ## Goal
 
@@ -110,7 +110,7 @@ integrations narrow them.
 
 ## Data & migration
 
-- kv keys unchanged (`slack_app_token`, `slack_bot_token`, `linear_key`) → no
+- kv keys unchanged (`slack_app_token`, `slack_bot_token`, `linear_api_key`) → no
   data migration needed; previously-connected users stay connected.
 - WS message kinds unchanged (`slack-message`, `urgent`, `slack-connected`),
   plus new `integration-changed`.

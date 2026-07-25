@@ -135,7 +135,9 @@ packages/dsp      pure audio DSP — no Electron dependency, tested in Node
 packages/actions  action model + macOS executor
 packages/llm      llama-server client + prompts (urgency, digest, drafts)
 packages/stt      whisper.cpp wrapper (local speech-to-text)
-packages/linear   Linear API client (assigned issues)
+packages/integrations       pluggable third-party connectors — hidden until connected
+packages/integrations/slack   Socket Mode intake, digests, drafts + manifest
+packages/integrations/linear  assigned issues + manifest
 ```
 
 ```bash
@@ -146,6 +148,8 @@ bun run typecheck
 bun start             # build + launch desktop app
 bun run server        # local daemon (Slack + AI endpoints)
 ```
+
+**Integrations** — Each integration is one package under `packages/integrations/` exporting a manifest (`connectFields`, `start/stop`, `status`, `routes`) plus one line in `apps/server/src/integrations.ts`. The registry auto-discovers them; UI appears from the manifest.
 
 ### Local AI (in-app setup)
 
@@ -174,9 +178,9 @@ and drafts are sent to that provider.
 
 ### Slack
 
-Paste your tokens into onboarding's **Connect** step or Settings → Connections (`xapp-…` app token with
+Paste your tokens into onboarding's **Connect** step or Settings → Integrations (`xapp-…` app token with
 `connections:write` + `xoxb-…` bot token; Socket Mode enabled on the app — no public
-URL needed). Bot must be invited to channels you want captured. `.env` values work as
+URL needed). The catalog shows each service; sidebar entries appear only when connected. Bot must be invited to channels you want captured. `.env` values work as
 a fallback for headless runs.
 
 ### Voice commands
@@ -193,9 +197,9 @@ a command you didn't choose. Unknown requests are ignored and shown as "no match
 
 ### Work — Linear + Claude Code
 
-Connect Linear in Setup (personal API key) and your open issues appear in the **Linear**
+Connect Linear in Settings → Integrations (personal API key) and your open issues appear in the **Linear**
 pane. Click one → it prefills a **Claude Code** session; pick the working directory
-(recent dirs remembered, e.g. `~/midgard/api`), hit Run. Sessions run headless
+(recent dirs remembered, e.g. `~/midgard/api`), hit Run. The Linear pane appears only when Linear is connected. Sessions run headless
 (`claude -p`), show live status, and store their output — click a session to read it,
 stop it mid-run if needed. Up to 3 concurrent.
 
