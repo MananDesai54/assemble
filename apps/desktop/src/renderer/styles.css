@@ -324,6 +324,9 @@ button { font: inherit; color: inherit; }
 .setting-row:last-child { border-bottom: none; }
 .setting-row > label { color: var(--ink); font-size: 13.5px; }
 .setting-row input[type='range'] { accent-color: var(--amber); width: 240px; }
+.danger-zone { border-top: 1px solid var(--danger) !important; margin-top: 14px; padding-top: 16px; }
+.secondary.danger { border-color: var(--danger); color: var(--danger); align-self: flex-start; }
+.secondary.danger:hover { background: color-mix(in srgb, var(--danger) 12%, var(--panel)); }
 .wave-rows > div { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
 
 /* ---------- slack extras ---------- */

@@ -85,6 +85,7 @@ app.whenReady().then(() => {
     return c;
   });
   ipcMain.handle('armed:set', (_e, v: boolean) => { setArmed(v); return v; });
+  ipcMain.handle('config:reset', () => { const c = store.reset(); trayHandle.rebuild(); return c; });
   ipcMain.on('tap', (_e, label: string, _confidence: number, count = 1) => {
     const cfg = store.get();
     if (!cfg.armed || label === 'ultron') return;

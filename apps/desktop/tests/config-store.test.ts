@@ -42,6 +42,15 @@ describe('ConfigStore', () => {
     expect(c.extras.camera.enabled).toBe(false);
   });
 
+  it('reset() restores defaults and persists', () => {
+    const s = fresh();
+    s.set({ sensitivity: 12, onboarded: true });
+    s.reset();
+    expect(s.get().sensitivity).toBe(6);
+    expect(s.get().onboarded).toBe(false);
+    expect(new ConfigStore(s.filePath).get().onboarded).toBe(false);
+  });
+
   it('survives corrupt file', () => {
     const s = fresh();
     s.set({ sensitivity: 9 });

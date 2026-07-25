@@ -63,6 +63,12 @@ export class ConfigStore {
 
   get(): AppConfig { return this.data; }
 
+  /** Factory reset: back to defaults, persisted. */
+  reset(): AppConfig {
+    this.data = DEFAULTS();
+    return this.set({});
+  }
+
   set(partial: ConfigPatch): AppConfig {
     const zones = partial.zones
       ? { ...this.data.zones, ...Object.fromEntries(Object.entries(partial.zones).map(

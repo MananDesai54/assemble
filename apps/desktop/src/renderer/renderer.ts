@@ -12,6 +12,7 @@ declare global {
       getConfig: () => Promise<AppConfig>;
       setConfig: (p: Partial<AppConfig>) => Promise<AppConfig>;
       setArmed: (v: boolean) => Promise<boolean>;
+      resetAll: () => Promise<AppConfig>;
       tap: (label: string, confidence: number, count: number) => void;
       extra: (kind: string) => void;
       whistleStep: (dir: number) => void;
@@ -694,6 +695,11 @@ function renderSettingsTab() {
       <div class="setting-row">
         <label>Sensitivity <span class="hint">left = softer taps register</span></label>
         <input type="range" id="sensitivity" min="3" max="15" step="0.5" />
+      </div>
+      <div class="setting-row danger-zone">
+        <label>Start over</label>
+        <span class="hint">Wipes everything: calibration, actions, Slack/Linear tokens, captured messages, call recordings, Claude Code session history. Back to the intro screen.</span>
+        <button class="secondary danger" id="wipe-btn">Wipe everything…</button>
       </div>`;
     $('#theme-sel').value = state.config.theme || 'system';
     $('#theme-sel').onchange = async (e: any) => {
@@ -709,6 +715,7 @@ function renderSettingsTab() {
       await window.assemble.setConfig({ sensitivity: state.config.sensitivity });
       await startEngine();
     };
+    $('#wipe-btn').onclick = wipeEverything;
   }
   if (state.settingsTab === 'gestures') {
     body.innerHTML = `
@@ -790,6 +797,22 @@ function renderSettingsTab() {
     void refreshSetupStatus();
     $('#install-all').onclick = installEverything;
   }
+}
+
+async function wipeEverything() {
+  const sure = confirm(
+    'Wipe everything?\n\nCalibration, corner actions, Slack & Linear tokens, captured messages, call recordings, and Claude Code session history will be deleted. This cannot be undone.',
+  );
+  if (!sure) return;
+  try { await fetch(`${SERVER}/reset`, { method: 'POST' }); } catch { /* server offline — local reset still proceeds */ }
+  state.config = await window.assemble.resetAll();
+  state.classifier = new TapClassifier();
+  state.activity = [];
+  if (state.camera) { state.camera.stop(); state.camera = null; }
+  applyTheme();
+  $('#armed').checked = state.config.armed;
+  toast('Everything wiped. Starting fresh.');
+  setMode('landing');
 }
 
 /* ================= teach logic ================= */

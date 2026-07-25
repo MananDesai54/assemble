@@ -14,7 +14,7 @@ import {
 import { myIssues } from '@assemble/linear';
 import { startSlack, type SlackIntake } from './slack';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LlmRuntime } from './llm-runtime';
@@ -129,6 +129,15 @@ app.post('/setup/slack', async c => {
   if (botToken) kvSet(db, 'slack_bot_token', botToken.trim());
   await restartSlack();
   return c.json({ connected: slackConnected });
+});
+
+app.post('/reset', async c => {
+  if (recorder.active) { try { await recorder.stop(); } catch { /* best effort */ } }
+  db.exec(`DELETE FROM messages; DELETE FROM recordings; DELETE FROM agent_sessions; DELETE FROM kv;`);
+  for (const dir of ['data/recordings', 'data/voice']) rmSync(dir, { recursive: true, force: true });
+  await restartSlack(); // tokens gone → intake stops
+  broadcast({ kind: 'reset' });
+  return c.json({ ok: true });
 });
 
 /* ================= slack ================= */
