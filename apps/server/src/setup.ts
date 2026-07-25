@@ -16,6 +16,7 @@ export interface SetupStatus {
 export const WHISPER_MODEL_PATH = 'models/ggml-medium.bin';
 export const WHISPER_MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin';
 export const AUDIOTAP_BIN = 'native/audiotap/audiotap';
+export const KEYWATCH_BIN = 'native/keywatch/keywatch';
 
 const has = (bin: string) => Bun.which(bin) !== null;
 
@@ -25,7 +26,7 @@ export function toolStatus(): Omit<SetupStatus, 'llmRunning' | 'slackConfigured'
     llamaCpp: has('llama-server'),
     whisperCpp: has('whisper-cli'),
     whisperModel: existsSync(WHISPER_MODEL_PATH) && statSync(WHISPER_MODEL_PATH).size > 1_000_000_000,
-    audiotap: existsSync(AUDIOTAP_BIN),
+    audiotap: existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN),
     swiftc: has('swiftc'),
   };
 }
@@ -84,10 +85,18 @@ export async function runSetupStep(step: SetupStep, onLine: (l: string) => void)
       if (toolStatus().whisperModel) { onLine('already downloaded'); return; }
       onLine('whisper medium model (~1.5 GB)…');
       return downloadWithProgress(WHISPER_MODEL_URL, WHISPER_MODEL_PATH, onLine);
-    case 'audiotap':
-      if (existsSync(AUDIOTAP_BIN)) { onLine('already built'); return; }
+    case 'audiotap': {
+      if (existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN)) { onLine('already built'); return; }
       if (!has('swiftc')) throw new Error('Xcode Command Line Tools required — run: xcode-select --install');
-      onLine('compiling audio capture helper…');
-      return streamCmd('swiftc', ['-O', 'native/audiotap/main.swift', '-o', AUDIOTAP_BIN], onLine);
+      if (!existsSync(AUDIOTAP_BIN)) {
+        onLine('compiling audio capture helper…');
+        await streamCmd('swiftc', ['-O', 'native/audiotap/main.swift', '-o', AUDIOTAP_BIN], onLine);
+      }
+      if (!existsSync(KEYWATCH_BIN)) {
+        onLine('compiling hotkey helper…');
+        await streamCmd('swiftc', ['-O', 'native/keywatch/main.swift', '-o', KEYWATCH_BIN], onLine);
+      }
+      return;
+    }
   }
 }

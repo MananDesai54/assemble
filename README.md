@@ -149,7 +149,7 @@ a fallback for headless runs.
 
 ### Voice commands
 
-**Ctrl+Shift+Space** (works with the window hidden) — or assign **🎙 Voice command** to
+**Double-tap Space** anywhere (listen-only key tap, needs Input Monitoring permission; Ctrl+Shift+Space fallback) — or assign **🎙 Voice command** to
 any gesture: triple-knock a corner, blow at the mic, wave. Speak; it stops on silence.
 whisper transcribes locally, Gemma maps it to a closed set of safe intents:
 

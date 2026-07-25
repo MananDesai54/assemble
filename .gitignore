@@ -5,3 +5,4 @@ models/
 .env
 data/
 native/audiotap/audiotap
+native/keywatch/keywatch

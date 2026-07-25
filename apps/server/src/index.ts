@@ -18,7 +18,8 @@ import { existsSync, rmSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LlmRuntime } from './llm-runtime';
-import { toolStatus, runSetupStep, SETUP_STEPS, WHISPER_MODEL_PATH, AUDIOTAP_BIN, type SetupStep } from './setup';
+import { toolStatus, runSetupStep, SETUP_STEPS, WHISPER_MODEL_PATH, AUDIOTAP_BIN, KEYWATCH_BIN, type SetupStep } from './setup';
+import { spawn } from 'node:child_process';
 
 const PORT = Number(process.env.ASSEMBLE_PORT || 4817);
 const DB_PATH = process.env.ASSEMBLE_DB || 'data/assemble.db';
@@ -419,4 +420,16 @@ void restartSlack();
 // resume the local LLM if the user enabled it before
 if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
   llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }));
+}
+
+// global double-space hotkey (listen-only event tap; needs Input Monitoring)
+if (existsSync(KEYWATCH_BIN)) {
+  const kw = spawn(KEYWATCH_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+  kw.stdout.on('data', (buf: Buffer) => {
+    for (const line of buf.toString().split('\n')) {
+      if (line.trim() === 'double-space') broadcast({ kind: 'voice-hotkey' });
+    }
+  });
+  kw.stderr.on('data', (buf: Buffer) => console.warn(buf.toString().trim()));
+  kw.on('exit', code => console.warn(`keywatch exited (${code}) — double-space hotkey off`));
 }

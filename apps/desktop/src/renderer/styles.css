@@ -358,6 +358,23 @@ button { font: inherit; color: inherit; }
 .progress-line b { font-family: Menlo, monospace; color: var(--amber); font-size: 18px; font-weight: 400; }
 .countdown { font-family: Menlo, monospace; font-size: 34px; color: var(--amber); }
 
+.consent-overlay {
+  position: fixed; inset: 0; z-index: 9;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(4px);
+  display: grid; place-items: center;
+  animation: toastin 200ms ease-out;
+}
+.consent-card {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: 0 18px 50px var(--shadow);
+  padding: 26px 30px; max-width: 420px; text-align: center;
+  display: flex; flex-direction: column; gap: 14px;
+  animation: pop 300ms cubic-bezier(0.2, 1.2, 0.4, 1) both;
+}
+.consent-card h3 { font-family: Futura, 'Avenir Next', sans-serif; font-weight: 500; font-size: 20px; }
+.consent-actions { display: flex; flex-direction: column; gap: 10px; align-items: center; }
+
 .toast {
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--ink); color: var(--bg); border-radius: 10px;

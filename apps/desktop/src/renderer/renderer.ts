@@ -82,13 +82,40 @@ async function init() {
   window.assemble.onArmedChanged(v => { $('#armed').checked = v; setStatus(); });
   window.assemble.onVoiceToggle(() => voiceToggle());
 
-  try {
-    await startEngine();
-  } catch (err) {
-    state.micError = (err as Error).message;
-  }
+  // Sensors never auto-start: mic begins in the setup flow (user-initiated) or
+  // after the consent prompt on the app screen.
+  $('#status').onclick = () => { if (!state.engine && state.mode === 'app') showSensorConsent(); };
   openWs();
   setMode(state.config.onboarded ? 'app' : 'landing');
+}
+
+async function startSensors() {
+  try {
+    await startEngine();
+    await syncCamera();
+  } catch (err) {
+    state.micError = (err as Error).message;
+    setStatus();
+  }
+}
+
+function showSensorConsent() {
+  document.querySelectorAll('.consent-overlay').forEach(e => e.remove());
+  const wantsCamera = state.config.extras.camera.enabled;
+  const ov = document.createElement('div');
+  ov.className = 'consent-overlay';
+  ov.innerHTML = `
+    <div class="consent-card">
+      <h3>Start listening?</h3>
+      <p class="hint">assemble needs the <b>microphone</b> to hear desk taps, whistles, and voice commands.${wantsCamera ? '<br/>The <b>camera</b> will also start — hand-wave gestures are enabled.' : ''}<br/>Nothing is recorded or sent anywhere.</p>
+      <div class="consent-actions">
+        <button class="primary" id="consent-start">Start${wantsCamera ? ' mic + camera' : ' microphone'}</button>
+        <button class="quiet-link" id="consent-later">Not now</button>
+      </div>
+    </div>`;
+  document.body.appendChild(ov);
+  $('#consent-start').onclick = async () => { ov.remove(); await startSensors(); };
+  $('#consent-later').onclick = () => { ov.remove(); toast('Sensors off — click the status dot to start.'); };
 }
 
 /* ================= theme ================= */
@@ -128,7 +155,7 @@ async function startEngine() {
 }
 
 async function syncCamera() {
-  const wanted = state.config.extras.camera.enabled && state.mode === 'app';
+  const wanted = state.config.extras.camera.enabled && state.mode === 'app' && state.engine !== null;
   if (wanted && !state.camera) {
     try {
       state.camera = await createCamera({
@@ -156,7 +183,11 @@ function setStatus() {
   const el = $('#status');
   if (!el) return;
   if (state.micError) { el.dataset.state = 'error'; $('#status-text').textContent = 'microphone unavailable'; return; }
-  if (!state.engine) { el.dataset.state = 'off'; $('#status-text').textContent = 'starting…'; return; }
+  if (!state.engine) {
+    el.dataset.state = 'off';
+    $('#status-text').textContent = state.mode === 'app' ? 'sensors off — click to start' : 'sensors off';
+    return;
+  }
   if (state.config.armed) { el.dataset.state = 'live'; $('#status-text').textContent = 'listening'; }
   else { el.dataset.state = 'paused'; $('#status-text').textContent = 'paused'; }
 }
@@ -234,7 +265,11 @@ const voiceSess = {
 
 function voiceToggle() {
   if (voiceSess.active) { void voiceStop(); return; }
-  if (!state.engine) { toast('Microphone not running.'); return; }
+  if (!state.engine) {
+    if (state.mode === 'app') showSensorConsent();
+    else toast('Microphone not running.');
+    return;
+  }
   voiceSess.active = true;
   voiceSess.chunks = [];
   voiceSess.sawSpeech = false;
@@ -298,7 +333,10 @@ function setMode(mode: Mode) {
   bg?.setBoost(mode !== 'app');
   if (mode === 'landing') renderLanding();
   if (mode === 'setup') renderSetup();
-  if (mode === 'app') renderApp();
+  if (mode === 'app') {
+    renderApp();
+    if (!state.engine && !state.micError) showSensorConsent();
+  }
   setStatus();
   void syncCamera();
 }
@@ -374,6 +412,7 @@ function stepFooter(body: HTMLElement, { next = 'Continue', skippable = true }: 
 }
 
 function stepMic() {
+  if (!state.engine) void startSensors(); // user clicked into setup — that's the consent
   const body = $('#setup-body');
   body.innerHTML = `
     <div class="eyebrow">step 1 · microphone</div>
@@ -734,7 +773,7 @@ function renderSettingsTab() {
         <div><label>Wave on the left</label></div>
         <div><label>Wave on the right</label></div>
       </div>
-      <p class="hint">Corner knock patterns are edited on the Desk page. Voice hotkey: Ctrl+Shift+Space.</p>`;
+      <p class="hint">Corner knock patterns are edited on the Desk page. Voice hotkey: <b>double-tap Space</b> anywhere (needs Input Monitoring permission; Ctrl+Shift+Space works as fallback).</p>`;
     $('#whistle-toggle').checked = state.config.extras.whistleVolume;
     $('#whistle-toggle').onchange = (e: any) => {
       state.config.extras.whistleVolume = e.target.checked;
@@ -1150,6 +1189,7 @@ function openWs() {
     if (payload.kind === 'slack-message') slackLine(payload.message);
     if (payload.kind === 'urgent') toast(`Urgent · ${payload.message.userName ?? '?'}: ${payload.message.text.slice(0, 80)}`);
     if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
+    if (payload.kind === 'voice-hotkey') voiceToggle();
     if (payload.kind === 'setup-progress') setupProgressLine(payload);
     if (payload.kind === 'recording') void onRecordingEvent(payload);
     if (payload.kind === 'agent') {
