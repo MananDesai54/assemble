@@ -253,6 +253,7 @@ h1 { font-family: Futura, 'Avenir Next', sans-serif; font-weight: 500; font-size
   border-radius: 7px; padding: 8px; font: inherit; resize: vertical;
 }
 .rec-dot { color: var(--danger); font-weight: 700; font-size: 12px; letter-spacing: 0.08em; animation: breathe 1.2s ease-in-out infinite; }
+.voice-dot { color: var(--amber); font-weight: 600; font-size: 12px; animation: breathe 1.2s ease-in-out infinite; }
 .setup-rows { display: flex; flex-direction: column; text-align: left; }
 .setup-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
 .setup-row .state { font-family: Menlo, monospace; font-size: 13px; width: 20px; }

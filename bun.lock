@@ -28,6 +28,7 @@
       "name": "@assemble/server",
       "version": "0.1.0",
       "dependencies": {
+        "@assemble/actions": "workspace:*",
         "@assemble/core": "workspace:*",
         "@assemble/llm": "workspace:*",
         "@assemble/stt": "workspace:*",

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
@@ -64,8 +64,15 @@ app.whenReady().then(() => {
     quit: () => { quitting = true; app.quit(); },
   });
 
-  const run = (action: Action | null | undefined) =>
+  const run = (action: Action | null | undefined) => {
+    if (action?.type === 'voice') return; // voice sessions live in the renderer
     executeAction(action).catch(err => console.error('action failed:', (err as Error).message));
+  };
+
+  // push-to-talk hotkey, works even when the window is hidden
+  globalShortcut.register('Control+Shift+Space', () => {
+    win.webContents.send('voice-toggle');
+  });
 
   ipcMain.handle('config:get', () => store.get());
   ipcMain.handle('config:set', (_e, partial: ConfigPatch) => {

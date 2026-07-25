@@ -145,6 +145,18 @@ Paste your tokens straight into the Power-ups screen (`xapp-…` app token with
 URL needed). Bot must be invited to channels you want captured. `.env` values work as
 a fallback for headless runs.
 
+### Voice commands
+
+**Ctrl+Shift+Space** (works with the window hidden) — or assign **🎙 Voice command** to
+any gesture: triple-knock a corner, blow at the mic, wave. Speak; it stops on silence.
+whisper transcribes locally, Gemma maps it to a closed set of safe intents:
+
+> "what did I miss on slack" → digest · "record this call" → recording ·
+> "take a screenshot" · "volume up" · "mute" · "lock screen" · "open github.com" · "open Spotify"
+
+Deliberately **no arbitrary shell from voice** — a misheard sentence must never execute
+a command you didn't choose. Unknown requests are ignored and shown as "no match".
+
 ### Call recording
 
 **● Record** in the Calls pane — or assign the "Record call (start/stop)" preset to any

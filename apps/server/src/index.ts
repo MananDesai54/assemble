@@ -2,8 +2,10 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { ServerWebSocket } from 'bun';
 import { WebClient } from '@slack/web-api';
-import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall } from '@assemble/llm';
+import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall, parseIntent } from '@assemble/llm';
 import { transcribe } from '@assemble/stt';
+import { executeAction } from '@assemble/actions';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   openDb, insertMessage, recentMessages, setUrgency,
   messagesAfter, channelMessages, lastMessageId, kvGet, kvSet,
@@ -117,15 +119,19 @@ app.get('/slack/recent', c => {
   return c.json(recentMessages(db, limit));
 });
 
-app.post('/slack/digest', async c => {
-  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
+async function runDigest(): Promise<{ summary: string; count: number }> {
   const cursor = Number(kvGet(db, 'digest_cursor') || 0);
   const rows = messagesAfter(db, cursor, 200);
   const summary = await digestMessages(llm, rows.map(r => ({
     channelName: r.channel_name, userName: r.user_name, text: r.text,
   })));
   kvSet(db, 'digest_cursor', String(lastMessageId(db)));
-  return c.json({ summary, count: rows.length });
+  return { summary, count: rows.length };
+}
+
+app.post('/slack/digest', async c => {
+  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
+  return c.json(await runDigest());
 });
 
 app.post('/slack/draft', async c => {
@@ -207,6 +213,70 @@ async function processRecording(id: number, wavPath: string) {
     console.error('recording pipeline failed:', (err as Error).message);
   }
 }
+
+/* ================= voice commands ================= */
+
+app.post('/voice', async c => {
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength < 1000) return c.json({ error: 'no audio' }, 400);
+  mkdirSync('data/voice', { recursive: true });
+  const wavPath = `data/voice/cmd-${Date.now()}.wav`;
+  writeFileSync(wavPath, Buffer.from(body));
+
+  let transcript: string;
+  try {
+    transcript = await transcribe(wavPath, { modelPath: WHISPER_MODEL_PATH });
+  } catch (err) {
+    return c.json({ error: `transcription failed: ${(err as Error).message} — open Setup` }, 503);
+  }
+  if (!(await llmReady())) return c.json({ transcript, intent: { kind: 'none', reason: 'local AI off' }, result: null });
+
+  const intent = await parseIntent(llm, transcript);
+  let result: string | null = null;
+  try {
+    switch (intent.kind) {
+      case 'digest': {
+        const d = await runDigest();
+        notifyMac('Slack digest', d.summary.slice(0, 180));
+        result = d.summary;
+        break;
+      }
+      case 'record-toggle': {
+        if (recorder.active) {
+          const rec = await recorder.stop();
+          const row = listRecordings(db, 1).find(r => r.wav_path === rec.wavPath);
+          if (row) {
+            updateRecording(db, row.id, { ended_at: new Date().toISOString(), status: 'transcribing' });
+            broadcast({ kind: 'recording', state: 'transcribing', id: row.id });
+            void processRecording(row.id, rec.wavPath);
+          }
+          result = 'recording stopped';
+        } else {
+          const rec = recorder.start();
+          const id = insertRecording(db, rec.wavPath, rec.startedAt);
+          notifyMac('assemble', 'Recording started — participants should know.');
+          broadcast({ kind: 'recording', state: 'started', id });
+          result = 'recording started';
+        }
+        break;
+      }
+      case 'system':
+        await executeAction({ type: 'system', value: intent.value });
+        result = intent.value;
+        break;
+      case 'open':
+        await executeAction({ type: 'open', value: intent.value });
+        result = `opened ${intent.value}`;
+        break;
+      case 'none':
+        result = null;
+        break;
+    }
+  } catch (err) {
+    return c.json({ transcript, intent, error: (err as Error).message }, 500);
+  }
+  return c.json({ transcript, intent, result });
+});
 
 /* ================= websocket + boot ================= */
 

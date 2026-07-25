@@ -10,6 +10,10 @@ describe('buildCommand', () => {
     expect(buildCommand({ type: 'open', value: 'https://x.com' })).toBe("open 'https://x.com'");
   });
 
+  it('open bare name uses open -a', () => {
+    expect(buildCommand({ type: 'open', value: 'Spotify' })).toBe("open -a 'Spotify'");
+  });
+
   it('keystroke char with modifiers → osascript keystroke', () => {
     const cmd = buildCommand({ type: 'keystroke', value: 'cmd+shift+4' });
     expect(cmd).toContain('keystroke "4"');

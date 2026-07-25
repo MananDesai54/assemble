@@ -8,4 +8,5 @@ contextBridge.exposeInMainWorld('assemble', {
   extra: (kind: string) => ipcRenderer.send('extra', kind),
   whistleStep: (dir: number) => ipcRenderer.send('whistle-step', dir),
   onArmedChanged: (cb: (v: boolean) => void) => ipcRenderer.on('armed-changed', (_e, v) => cb(v)),
+  onVoiceToggle: (cb: () => void) => ipcRenderer.on('voice-toggle', () => cb()),
 });

@@ -16,7 +16,7 @@ export const ZONE_IDS: ZoneId[] = ZONES.map(z => z.id);
 export const REJECT_LABEL = 'ultron';
 export const zoneById = (id: string): Zone | undefined => ZONES.find(z => z.id === id);
 
-export type ActionType = 'shell' | 'keystroke' | 'open' | 'system';
+export type ActionType = 'shell' | 'keystroke' | 'open' | 'system' | 'voice';
 
 export interface Action {
   type: ActionType;

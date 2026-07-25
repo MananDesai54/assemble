@@ -6,3 +6,4 @@ export * from './pitch';
 export * from './whistle';
 export * from './blow';
 export * from './motion';
+export * from './wav';

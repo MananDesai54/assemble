@@ -90,6 +90,47 @@ export async function digestMessages(llm: Llm, messages: MessageLike[]): Promise
   ], { maxTokens: 400, temperature: 0.3 })).trim();
 }
 
+// Voice-intent catalog is deliberately closed: no arbitrary shell from voice —
+// a misheard sentence must never execute an arbitrary command.
+export type VoiceIntent =
+  | { kind: 'none'; reason: string }
+  | { kind: 'digest' }
+  | { kind: 'record-toggle' }
+  | { kind: 'system'; value: 'screenshot' | 'screenshot-region' | 'volume-up' | 'volume-down' | 'mute-toggle' | 'lock-screen' | 'display-sleep' }
+  | { kind: 'open'; value: string };
+
+const SYSTEM_VALUES = new Set(['screenshot', 'screenshot-region', 'volume-up', 'volume-down', 'mute-toggle', 'lock-screen', 'display-sleep']);
+
+export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIntent> {
+  if (!transcript.trim()) return { kind: 'none', reason: 'empty' };
+  const out = await llm.chat([
+    { role: 'system', content:
+      'Map a spoken command to ONE of these intents and reply with ONLY JSON:\n' +
+      '{"kind":"digest"} — summarize slack / what did I miss\n' +
+      '{"kind":"record-toggle"} — start or stop recording the call\n' +
+      '{"kind":"system","value":"screenshot"|"screenshot-region"|"volume-up"|"volume-down"|"mute-toggle"|"lock-screen"|"display-sleep"}\n' +
+      '{"kind":"open","value":"<https url or macOS app name>"} — open a site or app\n' +
+      '{"kind":"none","reason":"<why>"} — anything else, unclear, or not a command\n' +
+      'Never invent other kinds. When unsure choose none.' },
+    { role: 'user', content: transcript },
+  ], { maxTokens: 80, temperature: 0 });
+  const fenced = out.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenced ? fenced[1] : out;
+  const start = raw.indexOf('{'); const end = raw.lastIndexOf('}');
+  if (start === -1 || end <= start) return { kind: 'none', reason: 'unparseable' };
+  let parsed: any;
+  try { parsed = JSON.parse(raw.slice(start, end + 1)); } catch { return { kind: 'none', reason: 'unparseable' }; }
+  switch (parsed.kind) {
+    case 'digest': return { kind: 'digest' };
+    case 'record-toggle': return { kind: 'record-toggle' };
+    case 'system':
+      return SYSTEM_VALUES.has(parsed.value) ? { kind: 'system', value: parsed.value } : { kind: 'none', reason: 'unknown system value' };
+    case 'open':
+      return typeof parsed.value === 'string' && parsed.value.trim() ? { kind: 'open', value: parsed.value.trim() } : { kind: 'none', reason: 'no target' };
+    default: return { kind: 'none', reason: String(parsed.reason ?? 'no match') };
+  }
+}
+
 export async function summarizeCall(llm: Llm, transcript: string): Promise<string> {
   if (!transcript.trim()) return 'Empty recording.';
   return (await llm.chat([

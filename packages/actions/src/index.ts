@@ -41,7 +41,11 @@ function keystrokeCommand(value: string): string {
 export function buildCommand(action: Action): string {
   switch (action.type) {
     case 'shell': return action.value;
-    case 'open': return `open '${action.value.replace(/'/g, `'\\''`)}'`;
+    case 'open': {
+      const v = action.value.replace(/'/g, `'\\''`);
+      // URLs and paths open directly; bare names are app names
+      return /^(https?:\/\/|\/|~)/.test(action.value) ? `open '${v}'` : `open -a '${v}'`;
+    }
     case 'keystroke': return keystrokeCommand(action.value);
     case 'system': {
       const cmd = SYSTEM_PRESETS[action.value];

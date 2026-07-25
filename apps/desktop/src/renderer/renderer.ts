@@ -1,6 +1,6 @@
 import { ZONES, REJECT_LABEL, zoneById } from '@assemble/core';
 import type { Action, AppConfig, ZoneId } from '@assemble/core';
-import { fingerprint, TapClassifier, RhythmMatcher, WhistleController, BlowDetector } from '@assemble/dsp';
+import { fingerprint, TapClassifier, RhythmMatcher, WhistleController, BlowDetector, encodeWav16k } from '@assemble/dsp';
 import type { RhythmPattern } from '@assemble/dsp';
 import { createEngine, type Engine } from './engine';
 import { createCamera, type Camera } from './camera';
@@ -15,6 +15,7 @@ declare global {
       extra: (kind: string) => void;
       whistleStep: (dir: number) => void;
       onArmedChanged: (cb: (v: boolean) => void) => void;
+      onVoiceToggle: (cb: () => void) => void;
     };
   }
 }
@@ -64,6 +65,7 @@ async function init() {
   $('#armed').onchange = (e: any) => window.assemble.setArmed(e.target.checked);
   $('#armed').checked = state.config.armed;
   window.assemble.onArmedChanged(v => { $('#armed').checked = v; setStatus(); });
+  window.assemble.onVoiceToggle(() => voiceToggle());
 
   try {
     await startEngine();
@@ -115,8 +117,10 @@ async function syncCamera() {
     try {
       state.camera = await createCamera({
         onWave: side => {
-          logLine(`wave ${side} · ${actionSummary(state.config.extras.camera[side].action) || 'no action'}`, true);
-          window.assemble.extra(`wave-${side}`);
+          const action = state.config.extras.camera[side].action;
+          logLine(`wave ${side} · ${actionSummary(action) || 'no action'}`, true);
+          if (action?.type === 'voice') voiceToggle();
+          else window.assemble.extra(`wave-${side}`);
         },
       });
     } catch (err) {
@@ -149,6 +153,7 @@ function handleLevel(rms: number) {
 }
 
 function handleChunk(chunk: Float32Array) {
+  if (voiceSess.active) voiceCollect(chunk);
   if (state.screen !== 'main') return;
   const now = performance.now();
   if (state.config.extras.whistleVolume && state.whistle) {
@@ -160,7 +165,8 @@ function handleChunk(chunk: Float32Array) {
   if (state.config.extras.blow.action && state.blow) {
     if (state.blow.push(chunk, now)) {
       logLine(`blow · ${actionSummary(state.config.extras.blow.action)}`, true);
-      window.assemble.extra('blow');
+      if (state.config.extras.blow.action.type === 'voice') voiceToggle();
+      else window.assemble.extra('blow');
     }
   }
 }
@@ -194,7 +200,76 @@ function firePattern({ zone, count }: RhythmPattern) {
     `${prefix}${z.label} · ${action ? actionSummary(action) : 'no action for this pattern'} · ${(state.lastConfidence * 100).toFixed(0)}%`,
     !!action,
   );
+  if (action?.type === 'voice') { voiceToggle(); return; } // voice runs here, not in main
   window.assemble.tap(zone, state.lastConfidence, count);
+}
+
+/* ================= voice commands ================= */
+
+const voiceSess = {
+  active: false,
+  chunks: [] as Float32Array[],
+  sawSpeech: false,
+  silentMs: 0,
+  maxTimer: null as ReturnType<typeof setTimeout> | null,
+};
+
+function voiceToggle() {
+  if (voiceSess.active) { void voiceStop(); return; }
+  if (!state.engine) { toast('Microphone not running.'); return; }
+  voiceSess.active = true;
+  voiceSess.chunks = [];
+  voiceSess.sawSpeech = false;
+  voiceSess.silentMs = 0;
+  voiceSess.maxTimer = setTimeout(() => void voiceStop(), 15_000);
+  $('#voice-dot').hidden = false;
+  toast('Listening — speak a command…');
+}
+
+function voiceCollect(chunk: Float32Array) {
+  voiceSess.chunks.push(chunk.slice());
+  let s = 0;
+  for (let i = 0; i < chunk.length; i++) s += chunk[i] * chunk[i];
+  const rms = Math.sqrt(s / chunk.length);
+  const sr = state.engine?.sampleRate ?? 44100;
+  if (rms > 0.02) { voiceSess.sawSpeech = true; voiceSess.silentMs = 0; }
+  else voiceSess.silentMs += (chunk.length / sr) * 1000;
+  if (voiceSess.sawSpeech && voiceSess.silentMs > 1200) void voiceStop();
+}
+
+async function voiceStop() {
+  if (!voiceSess.active) return;
+  voiceSess.active = false;
+  if (voiceSess.maxTimer) clearTimeout(voiceSess.maxTimer);
+  $('#voice-dot').hidden = true;
+  const total = voiceSess.chunks.reduce((n, c) => n + c.length, 0);
+  if (!voiceSess.sawSpeech || total < 4000) { toast('Heard nothing.'); return; }
+  const all = new Float32Array(total);
+  let off = 0;
+  for (const c of voiceSess.chunks) { all.set(c, off); off += c.length; }
+  voiceSess.chunks = [];
+  toast('Working on it…');
+  try {
+    const wav = encodeWav16k(all, state.engine?.sampleRate ?? 44100);
+    const r = await fetch(`${SERVER}/voice`, { method: 'POST', body: wav });
+    const data = await r.json();
+    if (!r.ok) { toast(data.error || 'voice failed'); return; }
+    const heard = `"${(data.transcript || '').slice(0, 60)}"`;
+    if (data.intent?.kind === 'none') {
+      toast(`Heard ${heard} — no command matched.`);
+      logLine(`voice · ${heard} · no match`);
+    } else if (data.intent?.kind === 'digest' && data.result) {
+      const out = $('#digest-out');
+      if (out) { out.hidden = false; out.textContent = data.result; }
+      toast('Digest ready.');
+      logLine(`voice · ${heard} · digest`, true);
+    } else {
+      toast(`${heard} → ${data.result ?? data.intent.kind}`);
+      logLine(`voice · ${heard} · ${data.result ?? data.intent.kind}`, true);
+    }
+  } catch {
+    toast('Local server unreachable.');
+  }
 }
 
 /* ================= navigation ================= */
@@ -832,6 +907,7 @@ function isTrained(): boolean {
 function actionSummary(action: Action | null | undefined): string {
   if (!action || !action.type) return '';
   if (action.type === 'system') return PRESET_NAMES[action.value] || action.value;
+  if (action.type === 'voice') return '🎙 Voice command';
   return `${TYPE_NAMES[action.type]} ${action.value}`.trim();
 }
 
@@ -858,6 +934,7 @@ function actionPicker(current: Action | null | undefined, onChange: (a: Action |
       <option value="shell">Run a command</option>
       <option value="keystroke">Press a shortcut</option>
       <option value="open">Open app or link</option>
+      <option value="voice">🎙 Voice command</option>
     </select>
     <select class="pk-preset" hidden>
       ${Object.entries(PRESET_NAMES).map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}
@@ -874,13 +951,13 @@ function actionPicker(current: Action | null | undefined, onChange: (a: Action |
   }
   const syncVisibility = () => {
     presetSel.hidden = typeSel.value !== 'system';
-    valInput.hidden = typeSel.value === 'system' || typeSel.value === '';
+    valInput.hidden = typeSel.value === 'system' || typeSel.value === 'voice' || typeSel.value === '';
     valInput.placeholder = placeholders[typeSel.value] || '';
   };
   const emit = () => {
     const type = typeSel.value as Action['type'] | '';
-    const value = type === 'system' ? presetSel.value : valInput.value.trim();
-    onChange(type && (value || type === 'system') ? { type, value } : null);
+    const value = type === 'system' ? presetSel.value : type === 'voice' ? 'listen' : valInput.value.trim();
+    onChange(type && (value || type === 'system' || type === 'voice') ? { type, value } : null);
   };
   typeSel.onchange = () => { syncVisibility(); emit(); };
   presetSel.onchange = emit;

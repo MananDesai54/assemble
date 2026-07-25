@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall } from '../src/index';
+import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall, parseIntent } from '../src/index';
 
 function fakeLlm(reply: string, calls: any[] = []) {
   const fetchFn = async (url: string, init?: any) => {
@@ -60,6 +60,29 @@ describe('digestMessages', () => {
     const { llm } = fakeLlm('should not be called', calls);
     const out = await digestMessages(llm, []);
     expect(out).toBe('Nothing new.');
+    expect(calls.length).toBe(0);
+  });
+});
+
+describe('parseIntent', () => {
+  it('maps known intents', async () => {
+    const { llm } = fakeLlm('{"kind":"system","value":"screenshot"}');
+    expect(await parseIntent(llm, 'take a screenshot')).toEqual({ kind: 'system', value: 'screenshot' });
+  });
+
+  it('rejects invented kinds and bad system values', async () => {
+    const { llm: a } = fakeLlm('{"kind":"shell","value":"rm -rf /"}');
+    expect((await parseIntent(a, 'nuke it')).kind).toBe('none');
+    const { llm: b } = fakeLlm('{"kind":"system","value":"format-disk"}');
+    expect((await parseIntent(b, 'format disk')).kind).toBe('none');
+  });
+
+  it('none on garbage output and empty transcript', async () => {
+    const { llm } = fakeLlm('sure, doing that now!');
+    expect((await parseIntent(llm, 'hello')).kind).toBe('none');
+    const calls: any[] = [];
+    const { llm: c } = fakeLlm('x', calls);
+    expect((await parseIntent(c, '  ')).kind).toBe('none');
     expect(calls.length).toBe(0);
   });
 });
