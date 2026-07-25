@@ -6,6 +6,8 @@ const DEFAULTS = () => ({
   sensitivity: 6,
   armed: true,
   sounds: false,
+  theme: 'system',
+  onboarded: false,
   zones: { tl: { action: null }, tr: { action: null }, bl: { action: null }, br: { action: null } },
   classifier: null,
 });

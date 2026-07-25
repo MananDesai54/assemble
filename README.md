@@ -1,17 +1,8 @@
-# ASSEMBLE 🛡
+# assemble ◉
 
-**Avengers, assemble.** Your desk becomes a 4-button macro pad — no hardware, just the microphone.
+**Your desk is the keyboard.** Four corners of your desk become four programmable buttons — no hardware, just the microphone.
 
-Tap a corner of your desk. The app hears it, figures out *which* corner, and runs whatever you assigned there.
-
-| Desk corner | Avenger |
-|---|---|
-| Top-left | Iron Man |
-| Top-right | Captain America |
-| Bottom-left | Hulk |
-| Bottom-right | Thor |
-
-Anything that isn't a desk tap (typing, mugs, claps) gets rejected as **Ultron**.
+Tap a corner. The app hears it, figures out *which* corner, runs whatever you assigned there.
 
 ## How it works
 
@@ -19,10 +10,10 @@ One mic can't triangulate, but each desk corner *sounds different* at the mic �
 
 1. **Detect** — continuous stream; a sharp energy spike + fast decay = tap candidate.
 2. **Fingerprint** — ~46 ms around the onset → FFT → 32 log-spaced band energies, gain-normalized.
-3. **Classify** — k-nearest-neighbors against your calibration samples. Fires only when the match is close *and* clearly better than the runner-up; otherwise Ultron.
-4. **Act** — zone → your action. 300 ms cooldown against double-fires.
+3. **Classify** — k-nearest-neighbors against the samples you taught it. Fires only when the match is close *and* clearly better than the runner-up; everything else (typing, claps, mugs) is ignored.
+4. **Act** — corner → your action. 300 ms cooldown against double-fires.
 
-**Constraint:** the mic must stay where it was during calibration. Moved your laptop? Re-enter the Training Room.
+**Constraint:** the mic must stay where it was during teaching. Moved your laptop? Re-teach.
 
 ## Install & run
 
@@ -31,47 +22,47 @@ npm install
 npm start
 ```
 
-First launch: macOS asks for microphone access — allow it.
+First launch walks you through setup: mic check with a live meter, then teaching — tap each corner 10× as prompted, then 10 seconds of "noise you want ignored" (type, click, clap).
 
-If macOS claims "Electron.app contains malware": that's XProtect false-positiving on stale Electron dev builds. `npm install --save-dev electron@latest`, then `node node_modules/electron/install.js`.
-
-## Calibrate (Training Room)
-
-1. Click **Enter Training Room**.
-2. Tap each corner 10× as prompted ("Summon Iron Man…"). Vary strength a little.
-3. **Trap Ultron** phase: make non-tap noise — type, click, set a mug down, clap. Click **Done**.
-
-Watch the Activity log: taps should show the right Avenger with confidence %. Misfires? Recalibrate or lower sensitivity.
+If macOS claims "Electron.app contains malware": XProtect false-positive on stale Electron dev builds. `npm install --save-dev electron@latest`, then `node node_modules/electron/install.js`.
 
 ## Assign actions
 
-Per zone card:
+Click a corner on the desk map:
 
-| Type | Value example | Notes |
+| Action | Value example | Notes |
 |---|---|---|
-| Shell command | `say "assemble"` | anything zsh runs |
-| Keystroke | `cmd+shift+4` | needs Accessibility permission (System Settings → Privacy & Security → Accessibility → enable Electron/ASSEMBLE) |
-| Open app / URL | `https://github.com` or `/Applications/Spotify.app` | |
-| System preset | volume up/down, mute toggle, lock screen, screenshot (full / select-region) | screenshots go to clipboard; app needs Screen Recording permission. Want a file instead? Use a Shell action: `screencapture -x ~/Desktop/shot.png` |
+| System action | screenshot (full / region), volume up/down, mute, lock screen | screenshots go to clipboard; needs Screen Recording permission |
+| Run a command | `say "hello"` | anything zsh runs |
+| Press a shortcut | `cmd+shift+4` | needs Accessibility permission (System Settings → Privacy & Security) |
+| Open app or link | `https://github.com` or `/Applications/Spotify.app` | |
 
-## Tray
+## Interface
 
-🛡 in the menubar: **Assemble mode** (arm/disarm), **Open Settings**, **Quit**. Closing the window hides it — listening continues in the background.
+- **Desk map** — the 2×2 grid mirrors your physical desk; the dot in the middle is the mic. Every detected sound ripples from the dot; a recognized tap lights its corner.
+- **Listening switch** (top right, also in the ◉ menubar item) — master arm/disarm.
+- **Themes** — ☀/☾ toggle; follows system by default.
+- Closing the window hides it; listening continues. Quit from the menubar.
+
+## Teaching tips
+
+- Tap the **desk**, not the laptop — laptop-chassis taps all sound identical at the mic (vibration travels straight through) and usually clip.
+- Corners far apart beat spots near each other. Wood desks work best.
+- Knuckle taps, moderate strength, vary slightly.
+- Don't skip the noise step — that's what teaches it to reject claps and typing.
 
 ## Troubleshooting
 
-- **Wrong zone detected** — recalibrate; tap more distinctly different spots (far corners beat near-center points).
-- **Taps missed** — move the sensitivity slider left (the slider is a spike threshold: lower value = more sensitive).
-- **Random fires** — move it right, and feed more Ultron samples.
-- **Soft / glass desk** — worse separation; wood works best.
-- **`sounds` config key** — per-zone trigger sounds are stubbed in config, not wired in v1.
+- **Wrong corner detected** — re-teach with more distinct corner positions.
+- **Taps missed** — sensitivity slider left (lower threshold = softer taps register).
+- **Random fires** — slider right, re-teach with a longer noise phase.
 
 ## Manual test checklist
 
 1. `npm test` → all green (23 tests).
-2. Launch, grant mic. Tray 🛡 appears.
-3. Training Room: 10 taps × 4 corners + Ultron phase.
-4. Assign `say "assemble"` to Iron Man (shell). Tap top-left → Mac speaks.
-5. Typing burst → Activity shows "Ultron rejected".
-6. Disarm from tray → taps do nothing; re-arm → work again.
+2. Launch, grant mic. ◉ appears in menubar.
+3. Onboarding: meter jumps on tap → teach 4 corners + noise phase.
+4. Assign `say "hello"` (Run a command) to top-left. Tap top-left → Mac speaks.
+5. Typing burst → Activity shows "ignored a sound".
+6. Uncheck Listening → taps do nothing; re-check → work again.
 7. Close window → tap still fires (background listening).

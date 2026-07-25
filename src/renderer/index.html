@@ -3,33 +3,23 @@
 <head>
   <meta charset="utf-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:; worker-src blob:" />
-  <title>ASSEMBLE</title>
+  <title>assemble</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header>
-    <div id="reactor" title="arc reactor — pulses on any transient"></div>
-    <h1>ASSEMBLE</h1>
-    <label class="armed-toggle"><input type="checkbox" id="armed" /> Assemble mode</label>
+  <header id="topbar">
+    <span class="wordmark">assemble</span>
+    <span id="status" class="status" data-state="off"><span class="dot"></span><span id="status-text">starting…</span></span>
+    <div class="topbar-right">
+      <button id="theme-toggle" class="ghost" title="Switch theme">◐</button>
+      <label class="switch" id="armed-wrap" hidden>
+        <input type="checkbox" id="armed" />
+        <span>Listening</span>
+      </label>
+    </div>
   </header>
 
-  <section id="controls">
-    <label>Microphone <select id="device"></select></label>
-    <label>Sensitivity <input type="range" id="sensitivity" min="3" max="15" step="0.5" /></label>
-    <button id="calibrate">Enter Training Room</button>
-    <span id="calibration-status"></span>
-  </section>
-
-  <main id="zones"><!-- zone cards injected by renderer.js --></main>
-
-  <section id="wizard" hidden>
-    <h2 id="wizard-title"></h2>
-    <p id="wizard-instruction"></p>
-    <div id="wizard-progress"></div>
-    <button id="wizard-cancel">Cancel</button>
-  </section>
-
-  <section id="log-panel"><h2>Activity</h2><ul id="log"></ul></section>
+  <main id="screen"></main>
 
   <script type="module" src="renderer.js"></script>
 </body>
