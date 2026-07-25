@@ -9,6 +9,27 @@
 
 ![assemble](docs/screenshots/landing.png)
 
+## Your data stays on your machine
+
+Everything assemble hears, captures, or generates is stored **locally** — nothing is
+uploaded, no telemetry, no accounts:
+
+| What | macOS | Linux |
+|---|---|---|
+| App config (calibration, actions, theme) | `~/Library/Application Support/assemble/config.json` | `~/.config/assemble/` |
+| SQLite (Slack messages, recordings, sessions, tokens) | `~/Library/Application Support/assemble/data/` | `~/.local/share/assemble/data/` |
+| Call recordings + voice clips | `…/assemble/data/recordings`, `…/data/voice` | same, under `.local/share` |
+| Whisper models | `…/assemble/models/` | `~/.local/share/assemble/models/` |
+| Brain GGUFs (Gemma / gpt-oss) | `~/Library/Caches/llama.cpp/` | `~/.cache/llama.cpp/` |
+
+Override the server storage root with `ASSEMBLE_HOME=/path`.
+
+AI runs **on-device** by default (llama.cpp + whisper.cpp). The **single exception**
+is opt-in BYOK: if you switch Brain source to your own API key, Slack messages,
+transcripts, and drafts are sent to that provider — the UI warns you before enabling
+it. Mic and camera never start without an explicit prompt each launch, and
+Settings → General has a **Wipe everything** factory reset.
+
 ## How it works
 
 One mic can't triangulate, but each desk corner *sounds different* at the mic — distance, desk resonance, timbre. So:
@@ -82,6 +103,7 @@ Click a corner card — each corner takes up to three actions, one per knock pat
 
 ![Desk page](docs/screenshots/app.png)
 
+- On every launch, a **Start listening?** prompt asks before the mic (and camera, if waves are enabled) turns on — nothing auto-starts.
 - Every sound the app hears ripples from the mic dot; a recognized tap lights its corner and shows up in **Activity** with its confidence.
 - **Listening** switch (top right, or the ◉ menubar item) is the master arm/disarm — flip it off for meetings.
 - **Sensitivity**: left = softer taps register; right = only hard knocks.
@@ -113,6 +135,7 @@ packages/dsp      pure audio DSP — no Electron dependency, tested in Node
 packages/actions  action model + macOS executor
 packages/llm      llama-server client + prompts (urgency, digest, drafts)
 packages/stt      whisper.cpp wrapper (local speech-to-text)
+packages/linear   Linear API client (assigned issues)
 ```
 
 ```bash
@@ -130,11 +153,12 @@ Onboarding's **Brain** step — or Settings → Local AI anytime — installs ev
 with one click and live progress:
 
 - llama.cpp + whisper.cpp (via Homebrew)
-- whisper large-v3-turbo (1.6 GB) — speech-to-text for English, Hindi/Hinglish, Gujarati (auto-detected)
-- call capture helper (compiled locally)
-- **Gemma 4 12B** via llama-server (7 GB, first time only) — the local brain
+- your chosen **speech model** — whisper small (0.5 GB, fastest) / large-v3-turbo (1.6 GB, recommended, strong Hindi/Hinglish) / large-v3 (2.9 GB, max accuracy); language auto-detected
+- call capture + hotkey helpers (compiled locally)
+- your chosen **brain** via llama-server — Gemma 4 E4B (light, 8 GB RAM) / **Gemma 4 12B** (recommended, strong multilingual) / Gemma 4 26B-A4B (big MoE, 24 GB+) / gpt-oss-20b (OpenAI open-weight, English-first)
 
-No cloud AI, ever. Everything runs on this Mac. With the brain on:
+Both dropdowns show download size, RAM needs, and strengths; switching the brain
+hot-restarts llama-server. Local by default — with the brain on:
 
 - **Urgent pings** — every captured Slack message is triaged locally; genuinely urgent ones raise a macOS notification.
 - **Digest** — button on the Slack page summarizes everything since your last digest.
@@ -185,11 +209,11 @@ full autonomy in that directory — per run, never sticky.
 gesture (double-knock a corner, blow at the mic…). Captures both sides: your mic +
 system audio (ScreenCaptureKit; Screen Recording permission prompted on first use).
 On stop: whisper transcribes, Gemma summarizes with action items, everything lands in
-the Calls pane and stays on disk in `data/recordings/`.
+the Calls pane and stays on disk under your data directory (see \"Your data stays on your machine\").
 
 A macOS notification fires whenever recording starts, and **● REC** shows in the app —
 recording other people without telling them is illegal in many places. Tell your call.
 
-Config lives at `~/Library/Application Support/assemble/config.json` — delete it for a factory reset.
+Factory reset: Settings → General → **Wipe everything** (keeps downloaded models/engines; wipes all personal data).
 
 Roadmap (Slack intake, local Gemma 4 via llama.cpp, whisper.cpp call transcription, voice actions): `docs/superpowers/specs/2026-07-25-assemble-platform-design.md`.
