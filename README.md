@@ -1,4 +1,4 @@
-# assemble ◉
+<p align="center"><img src="assets/logo-name.svg" alt="assemble" width="180" /></p>
 
 **Your desk is the input device.** Tap corners, knock rhythms, whistle, blow, wave — assemble turns everyday physical gestures into programmable actions. No extra hardware: the microphone does most of it, the camera (optional, local-only) does the rest.
 

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#6366F1" />
+      <stop offset="100%" stop-color="#A855F7" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Container / Background -->
+  <rect width="400" height="400" rx="40" fill="#0F172A"/>
+
+  <!-- Assembled Blocks forming "A" -->
+  <g transform="translate(100, 80)">
+    <!-- Left Pillar -->
+    <path d="M 30 190 L 80 80 L 110 80 L 60 190 Z" fill="url(#grad1)" />
+    <!-- Right Pillar -->
+    <path d="M 170 190 L 120 80 L 90 80 L 140 190 Z" fill="url(#grad2)" />
+    <!-- Top Cap / Connector -->
+    <path d="M 100 30 L 135 90 L 65 90 Z" fill="#6366F1" />
+    <!-- Center Assembled Crossbar -->
+    <polygon points="65,130 135,130 150,155 50,155" fill="url(#grad2)" opacity="0.9"/>
+  </g>
+
+  <!-- Typography -->
+  <text x="200" y="320" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-weight="700" font-size="32" fill="#F8FAFC" text-anchor="middle" letter-spacing="4">ASSEMBLE</text>
+</svg>

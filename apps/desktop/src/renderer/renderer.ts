@@ -362,6 +362,25 @@ function renderLanding() {
   $('#screen').innerHTML = `
     <div class="landing">
       <div class="landing-inner">
+        <div class="hero-logo">
+          <svg viewBox="0 0 400 400" role="img" aria-label="assemble logo">
+            <defs>
+              <linearGradient id="logo-g1" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#6366F1"/><stop offset="100%" stop-color="#A855F7"/>
+              </linearGradient>
+              <linearGradient id="logo-g2" x1="0%" y1="100%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#06B6D4"/><stop offset="100%" stop-color="#3B82F6"/>
+              </linearGradient>
+            </defs>
+            <rect width="400" height="400" rx="40" fill="#0F172A"/>
+            <g transform="translate(100, 100)">
+              <path d="M 30 190 L 80 80 L 110 80 L 60 190 Z" fill="url(#logo-g1)"/>
+              <path d="M 170 190 L 120 80 L 90 80 L 140 190 Z" fill="url(#logo-g2)"/>
+              <path d="M 100 30 L 135 90 L 65 90 Z" fill="#6366F1"/>
+              <polygon points="65,130 135,130 150,155 50,155" fill="url(#logo-g2)" opacity="0.9"/>
+            </g>
+          </svg>
+        </div>
         <div class="hero-word">assemble</div>
         <p class="hero-tag">Your desk is the input device.</p>
         <div class="hero-chips">
