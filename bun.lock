@@ -34,8 +34,6 @@
         "@assemble/integration-slack": "workspace:*",
         "@assemble/llm": "workspace:*",
         "@assemble/stt": "workspace:*",
-        "@slack/socket-mode": "^2.0.0",
-        "@slack/web-api": "^7.0.0",
         "hono": "^4.0.0",
       },
     },

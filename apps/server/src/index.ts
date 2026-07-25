@@ -1,20 +1,18 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { ServerWebSocket } from 'bun';
-import { WebClient } from '@slack/web-api';
-import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall, parseIntent } from '@assemble/llm';
+import type { Hono as HonoApp } from 'hono';
+import type { IntegrationContext } from '@assemble/core';
+import { Llm, summarizeCall, parseIntent } from '@assemble/llm';
 import { transcribe } from '@assemble/stt';
 import { executeAction } from '@assemble/actions';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import {
-  openDb, kvGet, kvSet,
+  openDb, kvGet, kvSet, kvDel,
   insertRecording, updateRecording, listRecordings, getRecording,
 } from './db';
-import { myIssues } from '@assemble/integration-linear';
-import {
-  startSlack, type SlackIntake, ensureSlackTables, insertMessage, recentMessages,
-  setUrgency, messagesAfter, channelMessages, lastMessageId,
-} from '@assemble/integration-slack';
+import { runDigest } from '@assemble/integration-slack';
+import { registry, listIntegrations, connectIntegration, disconnectIntegration, startConfigured, stopAll } from './integrations';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
 import { existsSync, rmSync } from 'node:fs';
 import { notifyMac } from './notify';
@@ -34,7 +32,6 @@ const DB_PATH = process.env.ASSEMBLE_DB || join(DATA_DIR, 'assemble.db');
 
 migrateRepoLocalStorage();
 const db = openDb(DB_PATH);
-ensureSlackTables(db); // interim — Task 4 moves this into route mounting
 initAgentTables(db);
 
 // Brain source: local llama-server by default; BYOK = any OpenAI-compatible
@@ -54,21 +51,16 @@ let llm = buildLlm();
 const llmRuntime = new LlmRuntime();
 const recorder = new Recorder({ binPath: AUDIOTAP_BIN, dir: RECORDINGS_DIR });
 const agents = new AgentRunner();
-const linearKey = () => kvGet(db, 'linear_api_key') || process.env.LINEAR_API_KEY || '';
 const selectedWhisper = () => kvGet(db, 'whisper_model') || DEFAULT_WHISPER;
 const selectedLlm = () => kvGet(db, 'llm_model') || DEFAULT_LLM;
 const activeWhisperPath = () => whisperPath(selectedWhisper());
 
-// ---- slack tokens: UI-saved (kv) wins over .env ----
-const slackTokens = () => ({
-  appToken: kvGet(db, 'slack_app_token') || process.env.SLACK_APP_TOKEN || '',
-  botToken: kvGet(db, 'slack_bot_token') || process.env.SLACK_BOT_TOKEN || '',
-});
-let slackConnected = false;
-let slackIntake: SlackIntake | null = null;
-const webClient = () => {
-  const { botToken } = slackTokens();
-  return botToken ? new WebClient(botToken) : null;
+const ctx: IntegrationContext = {
+  kv: { get: k => kvGet(db, k), set: (k, v) => kvSet(db, k, v), del: k => kvDel(db, k) },
+  db,
+  broadcast,
+  llm: async () => ((await llmReady()) ? llm : null),
+  notify: notifyMac,
 };
 
 // llama-server reachability, refreshed lazily
@@ -89,7 +81,6 @@ app.use('*', cors()); // desktop renderer runs on file:// — allow localhost ca
 
 app.get('/health', async c => c.json({
   ok: true,
-  slack: slackConnected,
   llm: await llmReady(),
   recording: recorder.active !== null,
 }));
@@ -97,13 +88,9 @@ app.get('/health', async c => c.json({
 /* ================= setup ================= */
 
 app.get('/setup/status', async c => {
-  const { appToken, botToken } = slackTokens();
   return c.json({
     ...toolStatus(activeWhisperPath()),
     llmRunning: await llmReady(),
-    slackConfigured: Boolean(appToken && botToken),
-    slackConnected,
-    linearConfigured: Boolean(linearKey()),
     claudeCli: Bun.which('claude') !== null,
     steps: SETUP_STEPS,
   });
@@ -188,76 +175,42 @@ app.post('/setup/run', async c => {
   }
 });
 
-app.post('/setup/linear', async c => {
-  const { apiKey } = await c.req.json<{ apiKey?: string }>();
-  if (apiKey) kvSet(db, 'linear_api_key', apiKey.trim());
-  try {
-    const issues = await myIssues(linearKey());
-    return c.json({ connected: true, count: issues.length });
-  } catch (err) {
-    return c.json({ connected: false, error: (err as Error).message });
-  }
-});
-
-app.post('/setup/slack', async c => {
-  const { appToken, botToken } = await c.req.json<{ appToken?: string; botToken?: string }>();
-  if (appToken) kvSet(db, 'slack_app_token', appToken.trim());
-  if (botToken) kvSet(db, 'slack_bot_token', botToken.trim());
-  await restartSlack();
-  return c.json({ connected: slackConnected });
-});
-
 app.post('/reset', async c => {
   if (recorder.active) { try { await recorder.stop(); } catch { /* best effort */ } }
   db.exec(`DELETE FROM messages; DELETE FROM recordings; DELETE FROM agent_sessions; DELETE FROM kv;`);
   for (const dir of [RECORDINGS_DIR, VOICE_DIR]) rmSync(dir, { recursive: true, force: true });
-  await restartSlack(); // tokens gone → intake stops
+  await stopAll(); // tokens gone → intake stops
   broadcast({ kind: 'reset' });
   return c.json({ ok: true });
 });
 
-/* ================= slack ================= */
+/* ================= integrations ================= */
 
-app.get('/slack/recent', c => {
-  const limit = Math.min(200, Number(c.req.query('limit') || 50));
-  return c.json(recentMessages(db, limit));
+app.get('/integrations', async c => c.json(await listIntegrations(ctx)));
+
+app.post('/integrations/:id/connect', async c => {
+  const id = c.req.param('id');
+  try {
+    const status = await connectIntegration(ctx, id, await c.req.json<Record<string, string>>());
+    broadcast({ kind: 'integration-changed', id, connected: status.connected });
+    return c.json(status);
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
 });
 
-async function runDigest(): Promise<{ summary: string; count: number }> {
-  const cursor = Number(kvGet(db, 'digest_cursor') || 0);
-  const rows = messagesAfter(db, cursor, 200);
-  const summary = await digestMessages(llm, rows.map(r => ({
-    channelName: r.channel_name, userName: r.user_name, text: r.text,
-  })));
-  kvSet(db, 'digest_cursor', String(lastMessageId(db)));
-  return { summary, count: rows.length };
-}
-
-app.post('/slack/digest', async c => {
-  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
-  return c.json(await runDigest());
+app.post('/integrations/:id/disconnect', async c => {
+  const id = c.req.param('id');
+  try {
+    await disconnectIntegration(ctx, id);
+    broadcast({ kind: 'integration-changed', id, connected: false });
+    return c.json({ ok: true });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 400);
+  }
 });
 
-app.post('/slack/draft', async c => {
-  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
-  const { channel, ts } = await c.req.json<{ channel: string; ts?: string }>();
-  if (!channel) return c.json({ error: 'channel required' }, 400);
-  const context = channelMessages(db, channel, 15);
-  const target = (ts && context.find(m => m.slack_ts === ts)) || context[context.length - 1];
-  if (!target) return c.json({ error: 'no messages in channel' }, 404);
-  const toLike = (r: typeof target) => ({ channelName: r.channel_name, userName: r.user_name, text: r.text });
-  const draft = await draftReply(llm, context.map(toLike), toLike(target));
-  return c.json({ draft, target: { channel: target.channel, ts: target.slack_ts, threadTs: target.thread_ts } });
-});
-
-app.post('/slack/send', async c => {
-  const web = webClient();
-  if (!web) return c.json({ error: 'Slack not connected — open Setup' }, 503);
-  const { channel, text, threadTs } = await c.req.json<{ channel: string; text: string; threadTs?: string }>();
-  if (!channel || !text) return c.json({ error: 'channel and text required' }, 400);
-  const res = await web.chat.postMessage({ channel, text, ...(threadTs ? { thread_ts: threadTs } : {}) });
-  return c.json({ ok: res.ok, ts: res.ts });
-});
+for (const m of registry) app.route(`/integrations/${m.id}`, m.routes(ctx) as HonoApp);
 
 /* ================= recordings ================= */
 
@@ -318,18 +271,6 @@ async function processRecording(id: number, wavPath: string) {
   }
 }
 
-/* ================= linear ================= */
-
-app.get('/linear/issues', async c => {
-  const key = linearKey();
-  if (!key) return c.json({ error: 'Linear not connected — open Setup' }, 503);
-  try {
-    return c.json(await myIssues(key));
-  } catch (err) {
-    return c.json({ error: (err as Error).message }, 502);
-  }
-});
-
 /* ================= claude code sessions ================= */
 
 app.get('/agent/sessions', c => c.json(listSessions(db, Math.min(50, Number(c.req.query('limit') || 20)))));
@@ -386,7 +327,7 @@ app.post('/voice', async c => {
   try {
     switch (intent.kind) {
       case 'digest': {
-        const d = await runDigest();
+        const d = await runDigest(ctx);
         notifyMac('Slack digest', d.summary.slice(0, 180));
         result = d.summary;
         break;
@@ -450,47 +391,7 @@ const server = Bun.serve({
 });
 console.log(`assemble server on :${server.port} (db → ${DB_PATH})`);
 
-async function scoreInBackground(id: number, m: { channelName: string | null; userName: string | null; text: string }) {
-  if (!(await llmReady())) return;
-  try {
-    const verdict = await scoreUrgency(llm, m);
-    setUrgency(db, id, verdict.urgent, verdict.reason);
-    if (verdict.urgent) {
-      notifyMac(`Slack · #${m.channelName ?? '?'}`, `${m.userName ?? 'Someone'}: ${m.text.slice(0, 120)} (${verdict.reason})`);
-      broadcast({ kind: 'urgent', message: m, reason: verdict.reason });
-    }
-  } catch (err) {
-    console.error('urgency scoring failed:', (err as Error).message);
-  }
-}
-
-async function restartSlack() {
-  if (slackIntake) { await slackIntake.stop().catch(() => {}); slackIntake = null; }
-  slackConnected = false;
-  const { appToken, botToken } = slackTokens();
-  if (!appToken || !botToken) {
-    console.warn('slack: tokens missing — intake disabled, API still up');
-    return;
-  }
-  try {
-    slackIntake = await startSlack({
-      appToken,
-      botToken,
-      onMessage: m => {
-        const id = insertMessage(db, m);
-        if (id === null) return;
-        console.log(`[${m.channelName ?? m.channel}] ${m.userName ?? m.user}: ${m.text.slice(0, 80)}`);
-        broadcast({ kind: 'slack-message', message: m });
-        void scoreInBackground(id, m);
-      },
-    });
-    slackConnected = true;
-    broadcast({ kind: 'slack-connected' });
-  } catch (err) {
-    console.error('slack: failed to start —', (err as Error).message);
-  }
-}
-void restartSlack();
+void startConfigured(ctx);
 
 // resume the local LLM if the user enabled it before
 if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
