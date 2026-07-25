@@ -223,7 +223,10 @@ full autonomy in that directory — per run, never sticky.
 **● Record** in the Calls pane — or assign the "Record call (start/stop)" preset to any
 gesture (double-knock a corner, blow at the mic…). Captures both sides: your mic +
 system audio (ScreenCaptureKit; Screen Recording permission prompted on first use).
-On stop: whisper transcribes, Gemma summarizes with action items, everything lands in
+Transcription is **live**: whisper processes each ~10 s of audio as the call runs, so
+stopping even a very long call finishes in seconds. Summaries are **on demand** — click
+a finished recording → **Generate summary**; Gemma summarizes in rolling chunks (each
+round sees the summary so far + the next slice), so any call length works. Everything lands in
 the Calls pane and stays on disk under your data directory (see \"Your data stays on your machine\").
 
 A macOS notification fires whenever recording starts, and **● REC** shows in the app —

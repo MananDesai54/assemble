@@ -16,6 +16,7 @@ import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } fro
 import { existsSync, rmSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
+import { LiveTranscriber } from './live-stt';
 import { LlmRuntime } from './llm-runtime';
 import {
   toolStatus, runSetupStep, SETUP_STEPS, AUDIOTAP_BIN, KEYWATCH_BIN,
@@ -230,12 +231,64 @@ app.post('/record/toggle', async c => {
 app.post('/record/start', c => startRecording(c));
 app.post('/record/stop', c => stopRecording(c));
 
+// Live transcription runs during the call: every ~10 s of new audio is fed
+// to whisper, so stopping a long call doesn't mean a long wait.
+const liveStt = new Map<number, LiveTranscriber>();
+
+function beginRecording(): number {
+  const rec = recorder.start();
+  const id = insertRecording(db, rec.wavPath, rec.startedAt);
+  if (existsSync(activeWhisperPath())) {
+    const lt = new LiveTranscriber({
+      wavPath: rec.wavPath,
+      modelPath: activeWhisperPath(),
+      onSegment: (segment, full) => {
+        updateRecording(db, id, { transcript: full });
+        broadcast({ kind: 'recording', state: 'live-transcript', id, text: segment });
+      },
+    });
+    lt.start();
+    liveStt.set(id, lt);
+  }
+  notifyMac('assemble', 'Recording started — participants should know.');
+  broadcast({ kind: 'recording', state: 'started', id });
+  return id;
+}
+
+async function endRecording(): Promise<number | undefined> {
+  const rec = await recorder.stop();
+  const row = listRecordings(db, 1).find(r => r.wav_path === rec.wavPath);
+  const id = row?.id;
+  if (!id) return undefined;
+  updateRecording(db, id, { ended_at: new Date().toISOString(), status: 'transcribing' });
+  broadcast({ kind: 'recording', state: 'transcribing', id });
+  const lt = liveStt.get(id);
+  liveStt.delete(id);
+  void (async () => {
+    try {
+      const transcript = lt ? await lt.stop() : '';
+      if (transcript) {
+        updateRecording(db, id, { transcript, status: 'done' });
+        notifyMac('assemble', 'Call transcribed.');
+      } else {
+        // no live segments (model missing at start, or all silence) — full pass
+        const full = await transcribe(rec.wavPath, { modelPath: activeWhisperPath() });
+        updateRecording(db, id, { transcript: full, status: 'done' });
+        notifyMac('assemble', 'Call transcribed.');
+      }
+      broadcast({ kind: 'recording', state: 'done', id });
+    } catch (err) {
+      updateRecording(db, id, { status: 'error', summary: (err as Error).message });
+      broadcast({ kind: 'recording', state: 'error', id });
+      console.error('recording pipeline failed:', (err as Error).message);
+    }
+  })();
+  return id;
+}
+
 function startRecording(c: any) {
   try {
-    const rec = recorder.start();
-    const id = insertRecording(db, rec.wavPath, rec.startedAt);
-    notifyMac('assemble', 'Recording started — participants should know.');
-    broadcast({ kind: 'recording', state: 'started', id });
+    const id = beginRecording();
     return c.json({ ok: true, id, state: 'recording' });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
@@ -244,35 +297,34 @@ function startRecording(c: any) {
 
 async function stopRecording(c: any) {
   try {
-    const rec = await recorder.stop();
-    const row = listRecordings(db, 1).find(r => r.wav_path === rec.wavPath);
-    const id = row?.id;
-    if (id) {
-      updateRecording(db, id, { ended_at: new Date().toISOString(), status: 'transcribing' });
-      broadcast({ kind: 'recording', state: 'transcribing', id });
-      void processRecording(id, rec.wavPath);
-    }
+    const id = await endRecording();
     return c.json({ ok: true, id, state: 'transcribing' });
   } catch (err) {
     return c.json({ error: (err as Error).message }, 500);
   }
 }
 
-async function processRecording(id: number, wavPath: string) {
+// Summaries are on-demand only: rolling chunk refinement handles calls of
+// any length (each round sees the summary so far + the next slice).
+app.post('/recordings/:id/summarize', async c => {
+  const id = Number(c.req.param('id'));
+  const row = getRecording(db, id);
+  if (!row) return c.json({ error: 'not found' }, 404);
+  if (!row.transcript) return c.json({ error: 'no transcript yet' }, 400);
+  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
+  updateRecording(db, id, { status: 'summarizing' });
+  broadcast({ kind: 'recording', state: 'summarizing', id });
   try {
-    const transcript = await transcribe(wavPath, { modelPath: activeWhisperPath() });
-    updateRecording(db, id, { transcript });
-    let summary: string | null = null;
-    if (await llmReady()) summary = await summarizeCall(llm, transcript);
+    const summary = await summarizeCall(llm, row.transcript);
     updateRecording(db, id, { summary, status: 'done' });
     broadcast({ kind: 'recording', state: 'done', id });
-    notifyMac('assemble', summary ? `Call summarized: ${summary.slice(0, 100)}` : 'Call transcribed.');
+    return c.json({ ok: true, summary });
   } catch (err) {
-    updateRecording(db, id, { status: 'error', summary: (err as Error).message });
-    broadcast({ kind: 'recording', state: 'error', id });
-    console.error('recording pipeline failed:', (err as Error).message);
+    updateRecording(db, id, { status: 'done' }); // transcript is intact — just report
+    broadcast({ kind: 'recording', state: 'done', id });
+    return c.json({ error: (err as Error).message }, 500);
   }
-}
+});
 
 /* ================= claude code sessions ================= */
 
@@ -334,19 +386,10 @@ app.post('/voice', async c => {
         break;
       case 'record-toggle': {
         if (recorder.active) {
-          const rec = await recorder.stop();
-          const row = listRecordings(db, 1).find(r => r.wav_path === rec.wavPath);
-          if (row) {
-            updateRecording(db, row.id, { ended_at: new Date().toISOString(), status: 'transcribing' });
-            broadcast({ kind: 'recording', state: 'transcribing', id: row.id });
-            void processRecording(row.id, rec.wavPath);
-          }
+          await endRecording();
           result = 'recording stopped';
         } else {
-          const rec = recorder.start();
-          const id = insertRecording(db, rec.wavPath, rec.startedAt);
-          notifyMac('assemble', 'Recording started — participants should know.');
-          broadcast({ kind: 'recording', state: 'started', id });
+          beginRecording();
           result = 'recording started';
         }
         break;

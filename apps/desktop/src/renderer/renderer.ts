@@ -1366,13 +1366,33 @@ async function refreshRecordings() {
       li.textContent = `${when} · ${label}`;
       if (rec.status === 'done') {
         li.style.cursor = 'pointer';
-        li.title = 'Click for summary + transcript';
+        li.title = 'Click for transcript';
         li.onclick = () => {
           const open = li.querySelector('.rec-detail');
           if (open) { open.remove(); return; }
           const d = document.createElement('div');
           d.className = 'rec-detail';
-          d.textContent = `${rec.summary ?? ''}\n\n— transcript —\n${rec.transcript ?? ''}`;
+          d.textContent = rec.summary
+            ? `${rec.summary}\n\n— transcript —\n${rec.transcript ?? ''}`
+            : (rec.transcript ?? '(no transcript)');
+          if (!rec.summary && rec.transcript) {
+            const btn = document.createElement('button');
+            btn.className = 'secondary';
+            btn.textContent = 'Generate summary';
+            btn.style.marginTop = '8px';
+            btn.onclick = async e => {
+              e.stopPropagation();
+              btn.disabled = true; btn.textContent = 'Summarizing…';
+              try {
+                const r = await fetch(`${SERVER}/recordings/${rec.id}/summarize`, { method: 'POST' });
+                const data = await r.json();
+                if (!r.ok) { toast(`Summary failed: ${data.error}`); btn.disabled = false; btn.textContent = 'Generate summary'; }
+                // success re-renders via the 'done' WS event
+              } catch { toast('Local server unreachable.'); btn.disabled = false; btn.textContent = 'Generate summary'; }
+            };
+            d.appendChild(document.createElement('br'));
+            d.appendChild(btn);
+          }
           li.appendChild(d);
         };
       }
@@ -1381,10 +1401,19 @@ async function refreshRecordings() {
   } catch { /* server offline */ }
 }
 
-async function onRecordingEvent(p: { state: string }) {
-  recBtnState(p.state === 'started');
+async function onRecordingEvent(p: { state: string; text?: string }) {
   const status = $('#rec-status');
-  if (status) status.textContent = p.state === 'transcribing' ? 'transcribing…' : '';
+  if (p.state === 'live-transcript') {
+    // rolling tail of what whisper heard so far — recording is still on
+    if (status) status.textContent = `…${(p.text ?? '').slice(-90)}`;
+    return;
+  }
+  recBtnState(p.state === 'started');
+  if (status) {
+    status.textContent =
+      p.state === 'transcribing' ? 'transcribing…' :
+      p.state === 'summarizing' ? 'summarizing…' : '';
+  }
   if (p.state === 'done' || p.state === 'error' || p.state === 'stopped') void refreshRecordings();
 }
 

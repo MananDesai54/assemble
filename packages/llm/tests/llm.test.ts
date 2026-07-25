@@ -150,3 +150,17 @@ describe('digestMessages context budget', () => {
     expect(sent.length).toBeLessThanOrEqual(600);
   });
 });
+
+describe('summarizeCall rolling refinement', () => {
+  it('feeds each chunk with the summary so far', async () => {
+    const calls: any[] = [];
+    const { llm } = fakeLlm('running summary', calls);
+    const transcript = 'a'.repeat(25_000); // 3 chunks of 10k
+    const out = await summarizeCall(llm, transcript);
+    expect(out).toBe('running summary');
+    expect(calls.length).toBe(3);
+    expect(calls[0].body.messages[1].content).not.toContain('Summary of the call so far');
+    expect(calls[1].body.messages[1].content).toContain('Summary of the call so far:\nrunning summary');
+    expect(calls[2].body.messages[1].content).toContain('Next part of the transcript');
+  });
+});

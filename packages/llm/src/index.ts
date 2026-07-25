@@ -161,15 +161,30 @@ export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIn
   }
 }
 
+// Rolling refinement: transcripts of any length are summarized chunk by
+// chunk — each round sees the summary so far plus the next slice, so nothing
+// past the model's context window is ever silently dropped.
+const CALL_CHUNK_CHARS = 10_000;
+
 export async function summarizeCall(llm: Llm, transcript: string): Promise<string> {
-  if (!transcript.trim()) return 'Empty recording.';
-  return (await llm.chat([
-    { role: 'system', content:
-      'Summarize this call transcript for the participant. Structure: one-line gist, ' +
-      'key points (bullets), decisions, action items with owners if mentioned. Plain text, concise.' },
-    { role: 'user', content: transcript.slice(0, 24_000) },
-  ], { maxTokens: 600, temperature: 0.3 })).trim();
+  const text = transcript.trim();
+  if (!text) return 'Empty recording.';
+  let summary = '';
+  for (let i = 0; i < text.length; i += CALL_CHUNK_CHARS) {
+    const chunk = text.slice(i, i + CALL_CHUNK_CHARS);
+    summary = (await llm.chat([
+      { role: 'system', content:
+        'You maintain a running summary of a call transcript that arrives in parts. ' +
+        'Structure: one-line gist, key points (bullets), decisions, action items with owners if mentioned. ' +
+        'Merge the new part into the summary. Concise plain text; never mention that the transcript is partial.' },
+      { role: 'user', content: summary
+        ? `Summary of the call so far:\n${summary}\n\nNext part of the transcript:\n${chunk}`
+        : chunk },
+    ], { maxTokens: 600, temperature: 0.3 })).trim();
+  }
+  return summary;
 }
+
 
 export async function draftReply(
   llm: Llm,
