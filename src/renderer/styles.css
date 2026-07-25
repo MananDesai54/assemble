@@ -174,16 +174,44 @@ h1 { font-family: Futura, 'Avenir Next', sans-serif; font-weight: 500; font-size
 
 /* ---------- corner editor ---------- */
 .editor {
-  position: absolute; inset: 6px; z-index: 3;
-  background: var(--panel); border: 1px solid var(--amber); border-radius: 10px;
-  padding: 10px; display: flex; flex-direction: column; gap: 8px;
+  position: absolute; inset: 6%; z-index: 3;
+  background: var(--panel); border: 1px solid var(--amber); border-radius: 12px;
+  box-shadow: 0 14px 40px var(--shadow);
+  padding: 16px; display: flex; flex-direction: column; gap: 10px;
 }
+.editor-head { display: flex; align-items: center; justify-content: space-between; }
+.editor-rows { display: flex; flex-direction: column; gap: 8px; }
+.editor-row { display: flex; align-items: center; gap: 10px; }
+.pattern-label {
+  font-family: Menlo, monospace; color: var(--amber); width: 28px; text-align: right;
+}
+.editor-hint { color: var(--dim); font-size: 12px; }
 .editor select, .editor input {
-  width: 100%; background: var(--bg); color: var(--ink);
+  background: var(--bg); color: var(--ink);
   border: 1px solid var(--line); border-radius: 7px; padding: 6px 8px; font: inherit;
 }
-.editor .row { display: flex; gap: 8px; }
-.editor .row button { flex: 1; }
+
+/* ---------- action picker ---------- */
+.picker { display: inline-flex; gap: 8px; flex: 1; flex-wrap: wrap; }
+.picker select, .picker input {
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; font: inherit;
+}
+.picker input { min-width: 200px; flex: 1; }
+
+/* ---------- extras panel ---------- */
+.extras { width: min(720px, 92%); margin: 0 auto 18px; }
+.extras h2 {
+  font-family: Futura, sans-serif; font-size: 11px; letter-spacing: 0.24em;
+  text-transform: uppercase; color: var(--dim); margin-bottom: 8px;
+}
+.extra-row {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 0; border-top: 1px solid var(--line);
+}
+.extra-label { color: var(--dim); font-size: 13px; min-width: 130px; }
+.wave-rows { flex-direction: column; align-items: stretch; }
+.wave-rows > div { display: flex; align-items: center; gap: 12px; padding: 4px 0; }
 
 /* ---------- bottom strip ---------- */
 .bottom {

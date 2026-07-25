@@ -2,25 +2,35 @@ import { ZONES, REJECT_LABEL, zoneById } from '../shared/zones.js';
 import { fingerprint } from './audio/fingerprint.js';
 import { TapClassifier } from './audio/classifier.js';
 import { createEngine } from './audio/engine.js';
+import { RhythmMatcher } from './audio/rhythm.js';
+import { WhistleController } from './audio/whistle.js';
+import { BlowDetector } from './audio/blow.js';
+import { createCamera } from './audio/camera.js';
 
 const $ = sel => document.querySelector(sel);
 const TAPS_PER_ZONE = 10;
 const NOISE_SECONDS = 10;
+const PATTERNS = [1, 2, 3];
 
 const state = {
   config: null,
   classifier: new TapClassifier(),
   engine: null,
+  camera: null,
+  whistle: null,
+  blow: null,
+  rhythm: new RhythmMatcher(),
+  rhythmTimer: null,
+  lastConfidence: 1,
   screen: 'loading',        // welcome | mic | teach | main
   teach: null,              // {stepIdx, timer, secondsLeft}
-  openEditor: null,         // zone id with editor open
   micError: null,
 };
 
 const PRESET_NAMES = {
   'volume-up': 'Volume up', 'volume-down': 'Volume down', 'mute-toggle': 'Mute toggle',
   'lock-screen': 'Lock screen', 'screenshot': 'Screenshot to clipboard',
-  'screenshot-region': 'Screenshot region to clipboard',
+  'screenshot-region': 'Screenshot region to clipboard', 'display-sleep': 'Sleep the display',
 };
 const TYPE_NAMES = { shell: 'Run', keystroke: 'Press', open: 'Open', system: '' };
 
@@ -62,7 +72,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if ((state.config?.theme || 'system') === 'system') applyTheme();
 });
 
-/* ================= engine ================= */
+/* ================= engines ================= */
 
 async function startEngine() {
   if (state.engine) state.engine.stop();
@@ -71,9 +81,35 @@ async function startEngine() {
     sensitivity: state.config.sensitivity,
     onFrame: handleFrame,
     onLevel: handleLevel,
+    onChunk: handleChunk,
   });
+  state.whistle = new WhistleController({ sampleRate: state.engine.sampleRate });
+  state.blow = new BlowDetector({ sampleRate: state.engine.sampleRate });
   state.micError = null;
   setStatus();
+}
+
+async function syncCamera() {
+  const wanted = state.config.extras.camera.enabled && state.screen === 'main';
+  if (wanted && !state.camera) {
+    try {
+      state.camera = await createCamera({
+        onWave: side => {
+          logLine(`wave ${side} · ${actionSummary(state.config.extras.camera[side].action) || 'no action'}`, true);
+          window.assemble.extra(`wave-${side}`);
+        },
+      });
+    } catch (err) {
+      state.config.extras.camera.enabled = false;
+      window.assemble.setConfig({ extras: { camera: { enabled: false } } });
+      const toggle = $('#camera-toggle');
+      if (toggle) toggle.checked = false;
+      logLine(`camera unavailable: ${err.message}`);
+    }
+  } else if (!wanted && state.camera) {
+    state.camera.stop();
+    state.camera = null;
+  }
 }
 
 function setStatus() {
@@ -92,6 +128,23 @@ function handleLevel(rms) {
   for (let i = 0; i < bars.length; i++) bars[i].classList.toggle('on', i < lit);
 }
 
+function handleChunk(chunk) {
+  if (state.screen !== 'main') return;
+  const now = performance.now();
+  if (state.config.extras.whistleVolume) {
+    for (const ev of state.whistle.push(chunk, now)) {
+      logLine(`whistle ${ev.dir > 0 ? 'up · volume up' : 'down · volume down'}`, true);
+      window.assemble.whistleStep(ev.dir);
+    }
+  }
+  if (state.config.extras.blow.action) {
+    if (state.blow.push(chunk, now)) {
+      logLine(`blow · ${actionSummary(state.config.extras.blow.action)}`, true);
+      window.assemble.extra('blow');
+    }
+  }
+}
+
 function handleFrame(frame, sampleRate) {
   rippleDesk();
   const vec = fingerprint(frame, sampleRate);
@@ -102,20 +155,36 @@ function handleFrame(frame, sampleRate) {
     if (Number.isFinite(r.distance)) logLine('ignored a sound');
     return;
   }
-  const zone = zoneById(r.label);
-  logLine(`${zone.label} · ${actionSummary(state.config.zones[r.label].action)} · ${(r.confidence * 100).toFixed(0)}%`, true);
+  state.lastConfidence = r.confidence;
   litCorner(r.label);
-  window.assemble.tap(r.label, r.confidence);
+  const done = state.rhythm.push(r.label, performance.now());
+  if (done) firePattern(done);
+  clearTimeout(state.rhythmTimer);
+  state.rhythmTimer = setTimeout(() => {
+    const d = state.rhythm.flush(performance.now());
+    if (d) firePattern(d);
+  }, 650);
+}
+
+function firePattern({ zone, count }) {
+  const z = zoneById(zone);
+  const action = state.config.zones[zone].actions?.[String(count)];
+  const prefix = count > 1 ? `${count}× ` : '';
+  logLine(
+    `${prefix}${z.label} · ${action ? actionSummary(action) : 'no action for this pattern'} · ${(state.lastConfidence * 100).toFixed(0)}%`,
+    !!action,
+  );
+  window.assemble.tap(zone, state.lastConfidence, count);
 }
 
 /* ================= navigation ================= */
 
 function goto(screen) {
   state.screen = screen;
-  state.openEditor = null;
   ({ welcome: renderWelcome, mic: renderMic, teach: renderTeach, main: renderMain })[screen]();
   $('#armed-wrap').hidden = screen !== 'main';
   setStatus();
+  syncCamera();
 }
 
 /* ================= screens ================= */
@@ -158,11 +227,7 @@ function renderMic() {
     $('#cta').disabled = true;
   }
   populateDevices();
-  $('#device').onchange = async e => {
-    state.config.deviceId = e.target.value;
-    await window.assemble.setConfig({ deviceId: e.target.value });
-    try { await startEngine(); } catch (err) { state.micError = err.message; setStatus(); }
-  };
+  $('#device').onchange = onDeviceChange;
   $('#cta').onclick = () => goto('teach');
 }
 
@@ -220,7 +285,6 @@ function renderTeachStep() {
       if (state.teach.secondsLeft <= 0) finishTeach();
     }, 1000);
   }
-  // retry controls
   const row = document.createElement('div');
   row.style.cssText = 'display:flex; gap:10px; justify-content:center;';
   const redo = document.createElement('button');
@@ -259,7 +323,6 @@ function redoStep() {
 function previousStep() {
   clearInterval(state.teach.timer);
   const steps = teachSteps();
-  // wipe current step's partial samples, then the previous corner's, and redo it
   const cur = steps[state.teach.stepIdx];
   state.classifier.clear(cur.kind === 'zone' ? cur.zone.id : REJECT_LABEL);
   state.teach.stepIdx--;
@@ -313,8 +376,7 @@ function renderMain() {
   $('#screen').innerHTML = `
     <div class="desk-wrap" style="flex:1;">
       <div class="desk" id="desk">
-        ${ZONES.map(z => `<div class="corner" data-zone="${z.id}" tabindex="0" role="button"
-            aria-label="${z.label}: ${actionSummary(state.config.zones[z.id].action)}">
+        ${ZONES.map(z => `<div class="corner" data-zone="${z.id}" tabindex="0" role="button">
             <span class="pos">${z.label}</span>
             <span class="what" id="what-${z.id}"></span>
           </div>`).join('')}
@@ -326,6 +388,24 @@ function renderMain() {
         <span class="spacer"></span>
         <button class="secondary" id="reteach">${isTrained() ? 'Re-teach corners' : 'Teach corners'}</button>
       </div>
+      <section class="extras">
+        <h2>More triggers</h2>
+        <div class="extra-row">
+          <label class="switch"><input type="checkbox" id="whistle-toggle" />
+            <span>Whistle slides system volume — pitch up = louder</span></label>
+        </div>
+        <div class="extra-row" id="blow-row">
+          <span class="extra-label">Blow at the mic</span>
+        </div>
+        <div class="extra-row">
+          <label class="switch"><input type="checkbox" id="camera-toggle" />
+            <span>Hand waves via camera — processed locally, nothing recorded</span></label>
+        </div>
+        <div class="extra-row wave-rows" id="wave-rows" hidden>
+          <div><span class="extra-label">Wave on the left</span></div>
+          <div><span class="extra-label">Wave on the right</span></div>
+        </div>
+      </section>
       <div class="activity">
         <h2>Activity</h2>
         <ul id="log"></ul>
@@ -338,11 +418,7 @@ function renderMain() {
     el.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEditor(z.id); } };
   }
   populateDevices();
-  $('#device').onchange = async e => {
-    state.config.deviceId = e.target.value;
-    await window.assemble.setConfig({ deviceId: e.target.value });
-    try { await startEngine(); } catch (err) { state.micError = err.message; setStatus(); }
-  };
+  $('#device').onchange = onDeviceChange;
   $('#sensitivity').value = state.config.sensitivity;
   $('#sensitivity').onchange = async e => {
     state.config.sensitivity = Number(e.target.value);
@@ -350,6 +426,35 @@ function renderMain() {
     await startEngine();
   };
   $('#reteach').onclick = () => goto('teach');
+
+  // extras
+  $('#whistle-toggle').checked = state.config.extras.whistleVolume;
+  $('#whistle-toggle').onchange = e => {
+    state.config.extras.whistleVolume = e.target.checked;
+    window.assemble.setConfig({ extras: { whistleVolume: e.target.checked } });
+  };
+  $('#blow-row').appendChild(actionPicker(state.config.extras.blow.action, action => {
+    state.config.extras.blow.action = action;
+    window.assemble.setConfig({ extras: { blow: { action } } });
+  }));
+  $('#camera-toggle').checked = state.config.extras.camera.enabled;
+  $('#wave-rows').hidden = !state.config.extras.camera.enabled;
+  $('#camera-toggle').onchange = e => {
+    state.config.extras.camera.enabled = e.target.checked;
+    $('#wave-rows').hidden = !e.target.checked;
+    window.assemble.setConfig({ extras: { camera: { enabled: e.target.checked } } });
+    syncCamera();
+  };
+  const [leftRow, rightRow] = $('#wave-rows').children;
+  leftRow.appendChild(actionPicker(state.config.extras.camera.left.action, action => {
+    state.config.extras.camera.left = { action };
+    window.assemble.setConfig({ extras: { camera: { left: { action } } } });
+  }));
+  rightRow.appendChild(actionPicker(state.config.extras.camera.right.action, action => {
+    state.config.extras.camera.right = { action };
+    window.assemble.setConfig({ extras: { camera: { right: { action } } } });
+  }));
+
   if (!isTrained()) toast('Corners not taught yet — click "Teach corners" to start.');
 }
 
@@ -359,7 +464,7 @@ function isTrained() {
 }
 
 function actionSummary(action) {
-  if (!action || !action.type) return 'Not set — click to assign';
+  if (!action || !action.type) return '';
   if (action.type === 'system') return PRESET_NAMES[action.value] || action.value;
   return `${TYPE_NAMES[action.type]} ${action.value}`.trim();
 }
@@ -367,72 +472,103 @@ function actionSummary(action) {
 function updateCornerFace(zoneId) {
   const el = $(`#what-${zoneId}`);
   if (!el) return;
-  const action = state.config.zones[zoneId].action;
-  el.textContent = actionSummary(action);
-  el.classList.toggle('unset', !action);
+  const actions = state.config.zones[zoneId].actions || {};
+  const parts = PATTERNS.filter(n => actions[String(n)])
+    .map(n => `${n}× ${actionSummary(actions[String(n)])}`);
+  el.textContent = parts.length ? parts.join('  ·  ') : 'Not set — click to assign';
+  el.classList.toggle('unset', !parts.length);
 }
 
-function openEditor(zoneId) {
-  if (state.openEditor) closeEditor();
-  state.openEditor = zoneId;
-  const corner = $(`.corner[data-zone="${zoneId}"]`);
-  const action = state.config.zones[zoneId].action;
-  const ed = document.createElement('div');
-  ed.className = 'editor';
-  ed.innerHTML = `
-    <select class="ed-type">
+/* ================= action picker + corner editor ================= */
+
+// Small self-saving control: [type ▾] [preset ▾ | value input]
+function actionPicker(current, onChange) {
+  const wrap = document.createElement('span');
+  wrap.className = 'picker';
+  wrap.innerHTML = `
+    <select class="pk-type">
       <option value="">Does nothing</option>
       <option value="system">System action</option>
       <option value="shell">Run a command</option>
       <option value="keystroke">Press a shortcut</option>
       <option value="open">Open app or link</option>
     </select>
-    <select class="ed-preset" hidden>
+    <select class="pk-preset" hidden>
       ${Object.entries(PRESET_NAMES).map(([v, n]) => `<option value="${v}">${n}</option>`).join('')}
     </select>
-    <input class="ed-value" hidden />
-    <div class="row">
-      <button class="secondary ed-save">Save</button>
-      <button class="secondary ed-close">Close</button>
-    </div>`;
-  corner.appendChild(ed);
-  const typeSel = ed.querySelector('.ed-type');
-  const presetSel = ed.querySelector('.ed-preset');
-  const valInput = ed.querySelector('.ed-value');
+    <input class="pk-value" hidden />`;
+  const typeSel = wrap.querySelector('.pk-type');
+  const presetSel = wrap.querySelector('.pk-preset');
+  const valInput = wrap.querySelector('.pk-value');
   const placeholders = { shell: 'say "hello"', keystroke: 'cmd+shift+4', open: 'https://… or /Applications/App.app' };
-  if (action) {
-    typeSel.value = action.type;
-    if (action.type === 'system') presetSel.value = action.value;
-    else valInput.value = action.value;
+  if (current) {
+    typeSel.value = current.type;
+    if (current.type === 'system') presetSel.value = current.value;
+    else valInput.value = current.value;
   }
   const syncVisibility = () => {
     presetSel.hidden = typeSel.value !== 'system';
     valInput.hidden = typeSel.value === 'system' || typeSel.value === '';
     valInput.placeholder = placeholders[typeSel.value] || '';
   };
-  typeSel.onchange = syncVisibility;
-  syncVisibility();
-  ed.querySelector('.ed-save').onclick = async e => {
-    e.stopPropagation();
+  const emit = () => {
     const type = typeSel.value;
     const value = type === 'system' ? presetSel.value : valInput.value.trim();
-    const actionObj = type && (value || type === 'system') ? { type, value } : null;
-    state.config.zones[zoneId].action = actionObj;
-    await window.assemble.setConfig({ zones: { [zoneId]: { action: actionObj } } });
-    closeEditor();
+    onChange(type && (value || type === 'system') ? { type, value } : null);
   };
-  ed.querySelector('.ed-close').onclick = e => { e.stopPropagation(); closeEditor(); };
+  typeSel.onchange = () => { syncVisibility(); emit(); };
+  presetSel.onchange = emit;
+  valInput.onchange = emit;
+  syncVisibility();
+  return wrap;
+}
+
+function openEditor(zoneId) {
+  closeEditor();
+  const desk = $('#desk');
+  const zone = zoneById(zoneId);
+  const ed = document.createElement('div');
+  ed.className = 'editor';
+  ed.innerHTML = `
+    <div class="editor-head">
+      <b>${zone.label}</b>
+      <button class="ghost ed-close" title="Close">✕</button>
+    </div>
+    <div class="editor-rows"></div>
+    <p class="editor-hint">Taps in quick succession count as one pattern: two fast knocks = 2×.</p>`;
+  const rows = ed.querySelector('.editor-rows');
+  for (const n of PATTERNS) {
+    const row = document.createElement('div');
+    row.className = 'editor-row';
+    const label = document.createElement('span');
+    label.className = 'pattern-label';
+    label.textContent = `${n}×`;
+    row.appendChild(label);
+    row.appendChild(actionPicker(state.config.zones[zoneId].actions?.[String(n)] || null, action => {
+      const actions = { ...(state.config.zones[zoneId].actions || {}) };
+      if (action) actions[String(n)] = action; else delete actions[String(n)];
+      state.config.zones[zoneId].actions = actions;
+      window.assemble.setConfig({ zones: { [zoneId]: { actions } } });
+      updateCornerFace(zoneId);
+    }));
+    rows.appendChild(row);
+  }
+  ed.querySelector('.ed-close').onclick = closeEditor;
   ed.onclick = e => e.stopPropagation();
+  desk.appendChild(ed);
 }
 
 function closeEditor() {
   document.querySelectorAll('.editor').forEach(e => e.remove());
-  const id = state.openEditor;
-  state.openEditor = null;
-  if (id) updateCornerFace(id);
 }
 
 /* ================= shared bits ================= */
+
+async function onDeviceChange(e) {
+  state.config.deviceId = e.target.value;
+  await window.assemble.setConfig({ deviceId: e.target.value });
+  try { await startEngine(); } catch (err) { state.micError = err.message; setStatus(); }
+}
 
 async function populateDevices() {
   const sel = $('#device');

@@ -11,7 +11,7 @@ class Forwarder extends AudioWorkletProcessor {
 registerProcessor('forwarder', Forwarder);
 `;
 
-export async function createEngine({ deviceId, sensitivity = 6, onFrame, onLevel }) {
+export async function createEngine({ deviceId, sensitivity = 6, onFrame, onLevel, onChunk }) {
   const constraints = {
     audio: {
       ...(deviceId && deviceId !== 'default' ? { deviceId: { exact: deviceId } } : {}),
@@ -29,6 +29,7 @@ export async function createEngine({ deviceId, sensitivity = 6, onFrame, onLevel
   let levelAcc = 0, levelN = 0, lastLevelAt = 0;
   node.port.onmessage = e => {
     detector.push(e.data);
+    if (onChunk) onChunk(e.data, ctx.sampleRate);
     if (!onLevel) return;
     let s = 0;
     for (let i = 0; i < e.data.length; i++) s += e.data[i] * e.data[i];
@@ -44,6 +45,7 @@ export async function createEngine({ deviceId, sensitivity = 6, onFrame, onLevel
   const mute = ctx.createGain(); mute.gain.value = 0;
   node.connect(mute).connect(ctx.destination);
   return {
+    sampleRate: ctx.sampleRate,
     stop: () => { node.port.onmessage = null; stream.getTracks().forEach(t => t.stop()); ctx.close(); },
   };
 }

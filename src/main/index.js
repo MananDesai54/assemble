@@ -43,11 +43,26 @@ app.whenReady().then(() => {
   ipcMain.handle('config:get', () => store.get());
   ipcMain.handle('config:set', (_e, partial) => { const c = store.set(partial); trayHandle.rebuild(); return c; });
   ipcMain.handle('armed:set', (_e, v) => { setArmed(v); return v; });
-  ipcMain.on('tap', (_e, label, confidence) => {
+  ipcMain.on('tap', (_e, label, confidence, count = 1) => {
     const cfg = store.get();
     if (!cfg.armed || label === 'ultron') return;
-    const action = cfg.zones[label]?.action;
+    const action = cfg.zones[label]?.actions?.[String(count)];
     executeAction(action).catch(err => console.error('action failed:', err.message));
+  });
+  ipcMain.on('extra', (_e, kind) => {
+    const cfg = store.get();
+    if (!cfg.armed) return;
+    const action =
+      kind === 'blow' ? cfg.extras.blow.action :
+      kind === 'wave-left' ? cfg.extras.camera.left.action :
+      kind === 'wave-right' ? cfg.extras.camera.right.action : null;
+    executeAction(action).catch(err => console.error('action failed:', err.message));
+  });
+  ipcMain.on('whistle-step', (_e, dir) => {
+    const cfg = store.get();
+    if (!cfg.armed || !cfg.extras.whistleVolume) return;
+    executeAction({ type: 'system', value: dir > 0 ? 'volume-up' : 'volume-down' })
+      .catch(err => console.error('action failed:', err.message));
   });
 });
 

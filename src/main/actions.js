@@ -15,6 +15,7 @@ export const SYSTEM_PRESETS = {
   'lock-screen': `osascript -e 'tell application "System Events" to keystroke "q" using {command down, control down}'`,
   'screenshot':  `screencapture -x -c`,
   'screenshot-region': `screencapture -i -c`,
+  'display-sleep': `pmset displaysleepnow`,
 };
 
 function keystrokeCommand(value) {

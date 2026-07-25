@@ -24,7 +24,7 @@ describe('buildCommand', () => {
   });
 
   it('system presets exist and build', () => {
-    for (const p of ['volume-up', 'volume-down', 'mute-toggle', 'lock-screen', 'screenshot', 'screenshot-region'])
+    for (const p of ['volume-up', 'volume-down', 'mute-toggle', 'lock-screen', 'screenshot', 'screenshot-region', 'display-sleep'])
       expect(buildCommand({ type: 'system', value: p })).toBe(SYSTEM_PRESETS[p]);
   });
 
