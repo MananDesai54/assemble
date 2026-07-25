@@ -310,6 +310,7 @@ button { font: inherit; color: inherit; }
   background: var(--panel); color: var(--ink); border: 1px solid var(--line);
   border-radius: 7px; padding: 8px; font: 13px Menlo, monospace; width: 100%;
 }
+.int-icon svg { width: 14px; height: 14px; vertical-align: -2px; stroke: currentColor; fill: none; }
 
 /* ---------- model selectors ---------- */
 .model-selectors { display: flex; flex-direction: column; gap: 14px; width: 100%; text-align: left; }

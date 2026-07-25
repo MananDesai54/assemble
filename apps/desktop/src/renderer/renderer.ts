@@ -30,13 +30,19 @@ const NOISE_SECONDS = 10;
 const PATTERNS = [1, 2, 3] as const;
 
 type Mode = 'loading' | 'landing' | 'setup' | 'app';
-type Page = 'desk' | 'slack' | 'calls' | 'work' | 'activity' | 'settings';
-type SettingsTab = 'general' | 'gestures' | 'connections' | 'ai';
+type Page = string;
+type SettingsTab = 'general' | 'gestures' | 'integrations' | 'ai';
 
 interface TeachState {
   stepIdx: number;
   secondsLeft: number | null;
   timer: ReturnType<typeof setInterval> | null;
+}
+
+interface IntegrationField { key: string; label: string; placeholder: string; secret: boolean; help?: string; saved: boolean }
+interface IntegrationInfo {
+  id: string; name: string; description: string; icon: string;
+  connected: boolean; detail?: string; fields: IntegrationField[];
 }
 
 const state = {
@@ -57,9 +63,17 @@ const state = {
   teach: null as TeachState | null,
   micError: null as string | null,
   activity: [] as { time: string; text: string; hit: boolean }[],
+  integrations: [] as IntegrationInfo[],
 };
 
 let bg: Bg;
+
+const integrationById = (id: string) => state.integrations.find(i => i.id === id);
+
+async function fetchIntegrations(): Promise<void> {
+  try { state.integrations = await (await fetch(`${SERVER}/integrations`)).json(); }
+  catch { state.integrations = []; }
+}
 
 const PRESET_NAMES: Record<string, string> = {
   'volume-up': 'Volume up', 'volume-down': 'Volume down', 'mute-toggle': 'Mute toggle',
@@ -86,6 +100,7 @@ async function init() {
   // after the consent prompt on the app screen.
   $('#status').onclick = () => { if (!state.engine && state.mode === 'app') showSensorConsent(); };
   openWs();
+  await fetchIntegrations();
   setMode(state.config.onboarded ? 'app' : 'landing');
 }
 
@@ -479,24 +494,9 @@ function stepConnect() {
   body.innerHTML = `
     <div class="eyebrow">step 4 · connect</div>
     <h1>Wire in your work.</h1>
-    <div class="setup-inputs">
-      <b>Slack</b>
-      <span class="hint">api.slack.com → your app → Socket Mode on. App token needs <code>connections:write</code>.</span>
-      <input id="slack-app-token" type="password" placeholder="xapp-… app-level token" />
-      <input id="slack-bot-token" type="password" placeholder="xoxb-… bot token" />
-      <button class="secondary" id="slack-connect">Connect Slack</button>
-      <span id="slack-setup-status" class="hint"></span>
-    </div>
-    <div class="setup-inputs">
-      <b>Linear</b>
-      <span class="hint">linear.app → Settings → API → personal key. Issues become one-click Claude Code sessions.</span>
-      <input id="linear-key" type="password" placeholder="lin_api_…" />
-      <button class="secondary" id="linear-connect">Connect Linear</button>
-      <span id="linear-setup-status" class="hint"></span>
-    </div>`;
-  $('#slack-connect').onclick = connectSlackTokens;
-  $('#linear-connect').onclick = connectLinearKey;
-  void refreshSetupStatus();
+    <p class="lede">Optional — connect the services you use. Each one shows up in the sidebar once connected.</p>
+    <div id="int-catalog"></div>`;
+  void renderIntegrationsCatalog($('#int-catalog'));
   stepFooter(body);
 }
 
@@ -518,20 +518,30 @@ function stepReady() {
 
 /* ================= app shell ================= */
 
-const NAV: { page: Page; label: string; icon: string }[] = [
+const CORE_NAV: { page: string; label: string; icon: string }[] = [
   { page: 'desk', label: 'Desk', icon: '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>' },
-  { page: 'slack', label: 'Slack', icon: '<svg viewBox="0 0 16 16"><path d="M6 1v6M10 9v6M1 10h6M9 6h6" stroke-width="2" stroke-linecap="round"/></svg>' },
   { page: 'calls', label: 'Calls', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke-width="1.6"/><circle cx="8" cy="8" r="2"/></svg>' },
   { page: 'work', label: 'Work', icon: '<svg viewBox="0 0 16 16"><path d="M2 4l4 4-4 4M8 12h6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { page: 'activity', label: 'Activity', icon: '<svg viewBox="0 0 16 16"><path d="M1 8h3l2-5 4 10 2-5h3" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { page: 'settings', label: 'Settings', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.4" fill="none" stroke-width="1.6"/><path d="M8 1v2.4M8 12.6V15M1 8h2.4M12.6 8H15M3 3l1.7 1.7M11.3 11.3L13 13M13 3l-1.7 1.7M4.7 11.3L3 13" stroke-width="1.6" stroke-linecap="round"/></svg>' },
 ];
 
+// Integration pages are client-side modules keyed by manifest id.
+const INTEGRATION_PAGES: Record<string, () => void> = { slack: pageSlack };
+
+function navItems() {
+  const integrations = state.integrations
+    .filter(i => i.connected && INTEGRATION_PAGES[i.id])
+    .map(i => ({ page: i.id, label: i.name, icon: i.icon }));
+  // integrations sit between Desk and Calls — same spot Slack always lived
+  return [CORE_NAV[0], ...integrations, ...CORE_NAV.slice(1)];
+}
+
 function renderApp() {
   $('#screen').innerHTML = `
     <div class="shell">
       <nav class="sidenav">
-        ${NAV.map(n => `
+        ${navItems().map(n => `
           <button class="nav-item" data-page="${n.page}">
             ${n.icon}<span>${n.label}</span>
           </button>`).join('')}
@@ -539,12 +549,13 @@ function renderApp() {
       <main class="page" id="page"></main>
     </div>`;
   document.querySelectorAll('.nav-item').forEach(el => {
-    (el as HTMLElement).onclick = () => setPage((el as HTMLElement).dataset.page as Page);
+    (el as HTMLElement).onclick = () => setPage((el as HTMLElement).dataset.page!);
   });
+  if (!navItems().some(n => n.page === state.page)) state.page = 'desk';
   setPage(state.page);
 }
 
-function setPage(page: Page) {
+function setPage(page: string) {
   state.page = page;
   document.querySelectorAll('.nav-item').forEach(el =>
     el.classList.toggle('active', (el as HTMLElement).dataset.page === page));
@@ -552,7 +563,8 @@ function setPage(page: Page) {
   el.classList.remove('page-in');
   void el.offsetWidth;
   el.classList.add('page-in');
-  ({ desk: pageDesk, slack: pageSlack, calls: pageCalls, work: pageWork, activity: pageActivity, settings: pageSettings })[page]();
+  const core: Record<string, () => void> = { desk: pageDesk, calls: pageCalls, work: pageWork, activity: pageActivity, settings: pageSettings };
+  (core[page] ?? INTEGRATION_PAGES[page] ?? pageDesk)();
 }
 
 /* ================= page: desk ================= */
@@ -663,13 +675,14 @@ function pageWork() {
       </div>
       <ul id="work-list" class="feed"></ul>
     </div>
+    ${integrationById('linear')?.connected ? `
     <div class="pane">
       <div class="pane-toolbar"><b class="pane-title">Linear</b><span id="linear-status" class="pane-status"></span></div>
       <ul id="linear-list" class="feed"></ul>
-    </div>`;
+    </div>` : ''}`;
   $('#work-run').onclick = runAgent;
   void refreshWork();
-  void refreshLinear();
+  if (integrationById('linear')?.connected) void refreshLinear();
 }
 
 /* ================= page: activity ================= */
@@ -695,7 +708,7 @@ function pageActivity() {
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'general', label: 'General' },
   { id: 'gestures', label: 'Gestures' },
-  { id: 'connections', label: 'Connections' },
+  { id: 'integrations', label: 'Integrations' },
   { id: 'ai', label: 'Local AI' },
 ];
 
@@ -739,7 +752,7 @@ function renderSettingsTab() {
       </div>
       <div class="setting-row danger-zone">
         <label>Start over</label>
-        <span class="hint">Wipes everything: calibration, actions, Slack/Linear tokens, captured messages, call recordings, Claude Code session history. Back to the intro screen.</span>
+        <span class="hint">Wipes everything: calibration, actions, integration tokens, captured messages, call recordings, Claude Code session history. Back to the intro screen.</span>
         <button class="secondary danger" id="wipe-btn">Wipe everything…</button>
       </div>`;
     $('#theme-sel').value = state.config.theme || 'system';
@@ -803,25 +816,9 @@ function renderSettingsTab() {
       void window.assemble.setConfig({ extras: { ...state.config.extras, camera: { ...state.config.extras.camera, right: { action } } } });
     }));
   }
-  if (state.settingsTab === 'connections') {
-    body.innerHTML = `
-      <div class="setup-inputs">
-        <b>Slack</b>
-        <span class="hint">Socket Mode on; app token needs <code>connections:write</code>.</span>
-        <input id="slack-app-token" type="password" placeholder="xapp-… app-level token" />
-        <input id="slack-bot-token" type="password" placeholder="xoxb-… bot token" />
-        <button class="secondary" id="slack-connect">Connect Slack</button>
-        <span id="slack-setup-status" class="hint"></span>
-      </div>
-      <div class="setup-inputs">
-        <b>Linear</b>
-        <input id="linear-key" type="password" placeholder="lin_api_…" />
-        <button class="secondary" id="linear-connect">Connect Linear</button>
-        <span id="linear-setup-status" class="hint"></span>
-      </div>`;
-    $('#slack-connect').onclick = connectSlackTokens;
-    $('#linear-connect').onclick = connectLinearKey;
-    void refreshSetupStatus();
+  if (state.settingsTab === 'integrations') {
+    body.innerHTML = `<p class="hint">Connected services show up in the sidebar. Tokens live only in the local database.</p><div id="int-catalog"></div>`;
+    void renderIntegrationsCatalog($('#int-catalog'));
   }
   if (state.settingsTab === 'ai') {
     body.innerHTML = `
@@ -844,7 +841,7 @@ function renderSettingsTab() {
 
 async function wipeEverything() {
   const sure = confirm(
-    'Wipe everything?\n\nCalibration, corner actions, Slack & Linear tokens, captured messages, call recordings, and Claude Code session history will be deleted. This cannot be undone.',
+    'Wipe everything?\n\nCalibration, corner actions, integration tokens, captured messages, call recordings, and Claude Code session history will be deleted. This cannot be undone.',
   );
   if (!sure) return;
   try { await fetch(`${SERVER}/reset`, { method: 'POST' }); } catch { /* server offline — local reset still proceeds */ }
@@ -1103,15 +1100,6 @@ async function refreshSetupStatus(): Promise<Record<string, boolean>> {
       el.textContent = s[r.key] ? '✓' : '○';
       el.className = `state ${s[r.key] ? 'ok' : 'todo'}`;
     }
-    const slackStatus = $('#slack-setup-status');
-    if (slackStatus && !slackStatus.textContent) {
-      slackStatus.textContent = s.slackConnected ? 'Connected.' :
-        s.slackConfigured ? 'Tokens saved, not connected — check Socket Mode.' : '';
-    }
-    const linearStatus = $('#linear-setup-status');
-    if (linearStatus && !linearStatus.textContent) {
-      linearStatus.textContent = s.linearConfigured ? 'Key saved.' : '';
-    }
     return s;
   } catch {
     return {};
@@ -1145,39 +1133,54 @@ async function installEverything() {
   btn.disabled = false; btn.textContent = 'Install everything';
 }
 
-async function connectSlackTokens() {
-  const appToken = $('#slack-app-token').value.trim();
-  const botToken = $('#slack-bot-token').value.trim();
-  const status = $('#slack-setup-status');
-  if (!appToken && !botToken) { status.textContent = 'Paste at least the xapp- token.'; return; }
-  status.textContent = 'Connecting…';
-  try {
-    const r = await fetch(`${SERVER}/setup/slack`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appToken: appToken || undefined, botToken: botToken || undefined }),
-    });
-    const data = await r.json();
-    status.textContent = data.connected ? 'Connected.' : 'Saved, but not connected — check tokens + Socket Mode.';
-  } catch {
-    status.textContent = 'Local server unreachable.';
+async function renderIntegrationsCatalog(container: HTMLElement) {
+  await fetchIntegrations();
+  container.innerHTML = '';
+  for (const info of state.integrations) {
+    const card = document.createElement('div');
+    card.className = 'setup-inputs';
+    card.innerHTML = `
+      <b><span class="int-icon">${info.icon}</span> ${info.name}</b>
+      <span class="hint">${info.description}</span>
+      ${info.fields.map(f => `
+        ${f.help ? `<span class="hint">${f.help}</span>` : ''}
+        <input data-key="${f.key}" type="${f.secret ? 'password' : 'text'}"
+          placeholder="${f.saved ? `${f.label} saved — paste to replace` : f.placeholder}" />`).join('')}
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="secondary int-connect">${info.connected ? 'Reconnect' : 'Connect'}</button>
+        ${info.connected ? '<button class="quiet-link int-disconnect">Disconnect</button>' : ''}
+        <span class="hint int-status">${info.connected ? `Connected${info.detail ? ` — ${info.detail}` : ''}.` : (info.detail ?? '')}</span>
+      </div>`;
+    const status = card.querySelector('.int-status') as HTMLElement;
+    (card.querySelector('.int-connect') as HTMLElement).onclick = async () => {
+      const values: Record<string, string> = {};
+      card.querySelectorAll('input[data-key]').forEach(el => {
+        const input = el as HTMLInputElement;
+        if (input.value.trim()) values[input.dataset.key!] = input.value.trim();
+      });
+      status.textContent = 'Connecting…';
+      try {
+        const r = await fetch(`${SERVER}/integrations/${info.id}/connect`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values),
+        });
+        const data = await r.json();
+        status.textContent = r.ok ? `Connected${data.detail ? ` — ${data.detail}` : ''}.` : `Failed: ${data.error}`;
+        if (r.ok) { await fetchIntegrations(); if (state.mode === 'app') renderApp(); }
+      } catch { status.textContent = 'Local server unreachable.'; }
+    };
+    const disc = card.querySelector('.int-disconnect') as HTMLElement | null;
+    if (disc) disc.onclick = async () => {
+      if (!confirm(`Disconnect ${info.name}? Its saved tokens are deleted.`)) return;
+      try {
+        await fetch(`${SERVER}/integrations/${info.id}/disconnect`, { method: 'POST' });
+        await fetchIntegrations();
+        if (state.mode === 'app') { renderApp(); if (state.page === 'settings') void renderIntegrationsCatalog($('#tab-body')); }
+        else void renderIntegrationsCatalog(container);
+      } catch { status.textContent = 'Local server unreachable.'; }
+    };
+    container.appendChild(card);
   }
-}
-
-async function connectLinearKey() {
-  const apiKey = $('#linear-key').value.trim();
-  const status = $('#linear-setup-status');
-  if (!apiKey) { status.textContent = 'Paste a lin_api_ key.'; return; }
-  status.textContent = 'Checking…';
-  try {
-    const r = await fetch(`${SERVER}/setup/linear`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ apiKey }),
-    });
-    const data = await r.json();
-    status.textContent = data.connected ? `Connected — ${data.count} open issues.` : `Failed: ${data.error}`;
-  } catch {
-    status.textContent = 'Local server unreachable.';
-  }
+  if (!state.integrations.length) container.innerHTML = '<span class="hint">Local server offline — integrations unavailable.</span>';
 }
 
 /* ================= slack feed ================= */
@@ -1221,7 +1224,7 @@ async function openDraft(m: SlackMsg) {
 async function redraft() {
   if (!draftTarget) return;
   try {
-    const r = await fetch(`${SERVER}/slack/draft`, {
+    const r = await fetch(`${SERVER}/integrations/slack/draft`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: draftTarget.channel, ts: draftTarget.ts }),
     });
@@ -1237,7 +1240,7 @@ async function sendDraft() {
   const text = $('#draft-text').value.trim();
   if (!text) return;
   try {
-    const r = await fetch(`${SERVER}/slack/send`, {
+    const r = await fetch(`${SERVER}/integrations/slack/send`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channel: draftTarget.channel, text, threadTs: draftTarget.threadTs }),
     });
@@ -1254,7 +1257,7 @@ async function runDigest() {
   const out = $('#digest-out');
   btn.disabled = true; btn.textContent = 'Digesting…';
   try {
-    const r = await fetch(`${SERVER}/slack/digest`, { method: 'POST' });
+    const r = await fetch(`${SERVER}/integrations/slack/digest`, { method: 'POST' });
     const data = await r.json();
     out.hidden = false;
     out.textContent = r.ok ? `${data.summary}\n\n(${data.count} messages)` : (data.error || 'digest failed');
@@ -1268,7 +1271,7 @@ async function runDigest() {
 function connectSlackFeed() {
   const status = $('#slack-status');
   if (slackRetry) clearTimeout(slackRetry);
-  fetch(`${SERVER}/slack/recent?limit=20`)
+  fetch(`${SERVER}/integrations/slack/recent?limit=20`)
     .then(r => r.json())
     .then((rows: SlackMsg[]) => {
       if (status) status.textContent = '';
@@ -1304,6 +1307,9 @@ function openWs() {
     if (payload.kind === 'agent') {
       if (payload.state !== 'running') toast(`Claude Code session #${payload.id}: ${payload.state}`);
       void refreshWork();
+    }
+    if (payload.kind === 'integration-changed') {
+      void fetchIntegrations().then(() => { if (state.mode === 'app') renderApp(); });
     }
   };
   slackWs.onclose = () => { slackWs = null; scheduleSlackRetry(); };
@@ -1450,7 +1456,7 @@ interface LinearIssueUi { identifier: string; title: string; state: string; url:
 async function refreshLinear() {
   const status = $('#linear-status');
   try {
-    const r = await fetch(`${SERVER}/linear/issues`);
+    const r = await fetch(`${SERVER}/integrations/linear/issues`);
     const data = await r.json();
     if (!r.ok) { if (status) status.textContent = data.error; return; }
     if (status) status.textContent = '';
