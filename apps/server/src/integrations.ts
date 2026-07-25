@@ -47,8 +47,13 @@ export async function disconnectIntegration(ctx: IntegrationContext, id: string)
 /** Boot: start whatever is already configured; failures log, never crash. */
 export async function startConfigured(ctx: IntegrationContext): Promise<void> {
   for (const m of registry) {
-    try { await m.start(ctx); }
-    catch (err) { console.warn(`${m.id}: not started — ${(err as Error).message}`); }
+    try {
+      await m.start(ctx);
+      // boot runs in the background — tell any already-open UI it's live
+      ctx.broadcast({ kind: 'integration-changed', id: m.id, connected: true });
+    } catch (err) {
+      console.warn(`${m.id}: not started — ${(err as Error).message}`);
+    }
   }
 }
 

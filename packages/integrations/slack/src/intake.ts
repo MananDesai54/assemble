@@ -93,12 +93,19 @@ export async function startSlack({
   userToken,
   onMessage,
   log = console.log,
-  pollMs = 45_000,
+  pollMs = 10_000,
+  fullSweepEvery = 6,
+  hotWindowMs = 30 * 60_000,
 }: {
   userToken: string;
   onMessage: (m: EnrichedMessage) => void;
   log?: (msg: string) => void;
+  /** Fast tick — polls DMs and recently-active channels. */
   pollMs?: number;
+  /** Every Nth tick polls ALL conversations (catches quiet channels waking up). */
+  fullSweepEvery?: number;
+  /** A channel counts as hot for this long after its last message. */
+  hotWindowMs?: number;
 }): Promise<SlackIntake> {
   if (!userToken.startsWith('xoxp-')) {
     throw new Error('user token must start with xoxp- (api.slack.com → your app → OAuth & Permissions → User OAuth Token)');
@@ -129,9 +136,14 @@ export async function startSlack({
   }
 
   const lastSeen = new Map<string, string>(); // channel id → newest ts already fetched
+  const lastActivity = new Map<string, number>(); // channel id → ms epoch of last message
   let stopped = false;
   let ticking = false;
   let tick = 0;
+
+  const isHot = (c: Convo) =>
+    c.type === 'im' || c.type === 'mpim' ||
+    Date.now() - (lastActivity.get(c.id) ?? 0) < hotWindowMs;
 
   async function pollChannel(c: Convo) {
     const oldest = lastSeen.get(c.id);
@@ -139,7 +151,9 @@ export async function startSlack({
       // first visit: set the cursor to the newest message and emit nothing —
       // we listen for new messages only, never history
       const r: any = await web.conversations.history({ channel: c.id, limit: 1 });
-      lastSeen.set(c.id, String(r.messages?.[0]?.ts ?? '0'));
+      const newestTs = r.messages?.[0]?.ts;
+      lastSeen.set(c.id, String(newestTs ?? '0'));
+      if (newestTs) lastActivity.set(c.id, Number(newestTs) * 1000);
       return;
     }
     const r: any = await web.conversations.history({
@@ -151,6 +165,7 @@ export async function startSlack({
     for (const raw of (r.messages ?? []).slice().reverse()) {
       const norm = normalizeHistoryMessage(raw, c.id, c.type, team);
       if (!norm) continue;
+      lastActivity.set(c.id, Date.now());
       onMessage({
         ...norm,
         userName: await userName(norm.user),
@@ -166,8 +181,12 @@ export async function startSlack({
     ticking = true;
     try {
       tick++;
-      if (tick % 20 === 0) convos = await listConversations(web).catch(() => convos);
-      for (const c of convos) {
+      const full = tick === 1 || tick % fullSweepEvery === 0;
+      if (tick % (fullSweepEvery * 10) === 0) convos = await listConversations(web).catch(() => convos);
+      // fast ticks hit only hot conversations (DMs + recently active), so the
+      // 10s cadence stays well inside Slack's rate limits
+      const targets = full ? convos : convos.filter(isHot);
+      for (const c of targets) {
         if (stopped) break;
         await pollChannel(c).catch(err =>
           log(`slack: poll ${c.name ?? c.id} failed — ${(err as any)?.data?.error ?? (err as Error).message}`));
