@@ -773,7 +773,7 @@ function renderSettingsTab() {
         <div><label>Wave on the left</label></div>
         <div><label>Wave on the right</label></div>
       </div>
-      <p class="hint">Corner knock patterns are edited on the Desk page. Voice hotkey: <b>double-tap Space</b> anywhere (needs Input Monitoring permission; Ctrl+Shift+Space works as fallback).</p>`;
+      <p class="hint">Corner knock patterns are edited on the Desk page. Voice hotkey: press and release <b>Cmd+Shift</b> alone, anywhere (needs Input Monitoring permission; Ctrl+Shift+Space works as fallback).</p>`;
     $('#whistle-toggle').checked = state.config.extras.whistleVolume;
     $('#whistle-toggle').onchange = (e: any) => {
       state.config.extras.whistleVolume = e.target.checked;
@@ -980,7 +980,7 @@ function cancelTeach() {
 const SETUP_ROWS = [
   { key: 'llamaCpp', step: 'llama.cpp', label: 'AI engine — llama.cpp' },
   { key: 'whisperCpp', step: 'whisper-cpp', label: 'Speech engine — whisper.cpp' },
-  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model — whisper medium (1.5 GB)' },
+  { key: 'whisperModel', step: 'whisper-model', label: 'Speech model — whisper large-v3-turbo (1.6 GB, English + Hindi + Gujarati)' },
   { key: 'audiotap', step: 'audiotap', label: 'Call capture helper' },
   { key: 'llmRunning', step: 'llm-start', label: 'Local AI on — Gemma 4 12B (7 GB, first time only)' },
 ] as const;

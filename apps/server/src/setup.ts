@@ -13,8 +13,9 @@ export interface SetupStatus {
   slackConnected: boolean;
 }
 
-export const WHISPER_MODEL_PATH = 'models/ggml-medium.bin';
-export const WHISPER_MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin';
+// large-v3-turbo: near-medium speed, much better Hindi/Gujarati than medium.
+export const WHISPER_MODEL_PATH = 'models/ggml-large-v3-turbo.bin';
+export const WHISPER_MODEL_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo.bin';
 export const AUDIOTAP_BIN = 'native/audiotap/audiotap';
 export const KEYWATCH_BIN = 'native/keywatch/keywatch';
 
@@ -83,7 +84,7 @@ export async function runSetupStep(step: SetupStep, onLine: (l: string) => void)
       return streamCmd('brew', ['install', 'whisper-cpp'], onLine);
     case 'whisper-model':
       if (toolStatus().whisperModel) { onLine('already downloaded'); return; }
-      onLine('whisper medium model (~1.5 GB)…');
+      onLine('whisper large-v3-turbo model (~1.6 GB, multilingual)…');
       return downloadWithProgress(WHISPER_MODEL_URL, WHISPER_MODEL_PATH, onLine);
     case 'audiotap': {
       if (existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN)) { onLine('already built'); return; }

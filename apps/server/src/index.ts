@@ -427,7 +427,7 @@ if (existsSync(KEYWATCH_BIN)) {
   const kw = spawn(KEYWATCH_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
   kw.stdout.on('data', (buf: Buffer) => {
     for (const line of buf.toString().split('\n')) {
-      if (line.trim() === 'double-space') broadcast({ kind: 'voice-hotkey' });
+      if (line.trim() === 'voice-chord') broadcast({ kind: 'voice-hotkey' });
     }
   });
   kw.stderr.on('data', (buf: Buffer) => console.warn(buf.toString().trim()));

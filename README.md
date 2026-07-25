@@ -130,7 +130,7 @@ Onboarding's **Brain** step — or Settings → Local AI anytime — installs ev
 with one click and live progress:
 
 - llama.cpp + whisper.cpp (via Homebrew)
-- whisper medium model (1.5 GB) — speech-to-text
+- whisper large-v3-turbo (1.6 GB) — speech-to-text for English, Hindi/Hinglish, Gujarati (auto-detected)
 - call capture helper (compiled locally)
 - **Gemma 4 12B** via llama-server (7 GB, first time only) — the local brain
 
@@ -149,7 +149,7 @@ a fallback for headless runs.
 
 ### Voice commands
 
-**Double-tap Space** anywhere (listen-only key tap, needs Input Monitoring permission; Ctrl+Shift+Space fallback) — or assign **🎙 Voice command** to
+Press and release **Cmd+Shift** alone, anywhere (listen-only key tap — real shortcuts like Cmd+Shift+4 never trigger it; needs Input Monitoring permission; Ctrl+Shift+Space fallback) — or assign **🎙 Voice command** to
 any gesture: triple-knock a corner, blow at the mic, wave. Speak; it stops on silence.
 whisper transcribes locally, Gemma maps it to a closed set of safe intents:
 

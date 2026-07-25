@@ -111,6 +111,7 @@ export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIn
       '{"kind":"system","value":"screenshot"|"screenshot-region"|"volume-up"|"volume-down"|"mute-toggle"|"lock-screen"|"display-sleep"}\n' +
       '{"kind":"open","value":"<https url or macOS app name>"} — open a site or app\n' +
       '{"kind":"none","reason":"<why>"} — anything else, unclear, or not a command\n' +
+      'The command may be spoken in English, Hindi, Hinglish, or Gujarati — map by meaning. ' +
       'Never invent other kinds. When unsure choose none.' },
     { role: 'user', content: transcript },
   ], { maxTokens: 80, temperature: 0 });
@@ -150,7 +151,8 @@ export async function draftReply(
   return (await llm.chat([
     { role: 'system', content:
       'Draft a Slack reply for a software engineer. Concise, friendly, direct, no filler, ' +
-      'no signatures, match casual Slack tone. Reply with the message text only.' },
+      'no signatures, match casual Slack tone. Reply in the same language and script as the ' +
+      'conversation (English, Hindi, Hinglish, or Gujarati). Reply with the message text only.' },
     { role: 'user', content: `Conversation:\n${thread}\n\nDraft a reply to: ${fmt(target)}` },
   ], { maxTokens: 300, temperature: 0.5 })).trim();
 }

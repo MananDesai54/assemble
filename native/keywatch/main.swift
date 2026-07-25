@@ -1,36 +1,44 @@
-// keywatch — listen-only global key tap that prints "double-space" when the
-// spacebar is pressed twice within 350 ms (with no other key in between).
-// Never consumes or blocks events. Requires Input Monitoring permission.
+// keywatch — listen-only global key tap that prints "voice-chord" when
+// Cmd+Shift is pressed together and released without any other key.
+// Pressing another key while holding (e.g. Cmd+Shift+4) cancels — real
+// shortcuts never trigger it. Never consumes or blocks events.
+// Requires Input Monitoring permission.
 
 import CoreGraphics
 import Foundation
 
-var lastSpace: Double = 0
+var chordArmed = false
 
 let callback: CGEventTapCallBack = { _, type, event, _ in
-    if type == .keyDown {
-        let code = event.getIntegerValueField(.keyboardEventKeycode)
-        if code == 49 { // space
-            let now = Date().timeIntervalSince1970
-            if now - lastSpace < 0.35 {
-                print("double-space")
-                fflush(stdout)
-                lastSpace = 0
-            } else {
-                lastSpace = now
-            }
-        } else {
-            lastSpace = 0
+    let flags = event.flags
+    let cmdShift = flags.contains(.maskCommand) && flags.contains(.maskShift)
+    let otherMods = flags.contains(.maskControl) || flags.contains(.maskAlternate)
+
+    switch type {
+    case .flagsChanged:
+        if cmdShift && !otherMods {
+            chordArmed = true
+        } else if chordArmed && !flags.contains(.maskCommand) && !flags.contains(.maskShift) {
+            chordArmed = false
+            print("voice-chord")
+            fflush(stdout)
+        } else if otherMods {
+            chordArmed = false
         }
+    case .keyDown:
+        chordArmed = false // any real key while holding = a normal shortcut
+    default:
+        break
     }
     return Unmanaged.passUnretained(event)
 }
 
+let mask = CGEventMask((1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.flagsChanged.rawValue))
 guard let tap = CGEvent.tapCreate(
     tap: .cgSessionEventTap,
     place: .headInsertEventTap,
     options: .listenOnly,
-    eventsOfInterest: CGEventMask(1 << CGEventType.keyDown.rawValue),
+    eventsOfInterest: mask,
     callback: callback,
     userInfo: nil
 ) else {
