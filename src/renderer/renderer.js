@@ -40,7 +40,8 @@ async function init() {
   } catch (err) {
     state.micError = err.message;
   }
-  goto(state.config.onboarded ? 'main' : 'welcome');
+  const forced = new URLSearchParams(location.hash.slice(1)).get('screen');
+  goto(forced || (state.config.onboarded ? 'main' : 'welcome'));
 }
 
 /* ================= theme ================= */

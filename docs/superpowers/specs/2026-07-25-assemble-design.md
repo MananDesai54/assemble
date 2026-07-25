@@ -3,6 +3,13 @@
 Date: 2026-07-25
 Status: Approved (user, 2026-07-25)
 
+> **Superseded in part (2026-07-25, later same day):** the Avengers theming below was
+> dropped at the user's request. UI now uses neutral naming (corners by position, app
+> name "assemble"), a first-run onboarding flow (welcome → mic check → guided teaching),
+> a desk-map main screen, and light/dark themes. The signal pipeline, classifier, and
+> action model are unchanged. The internal reject label remains `ultron` for config
+> compatibility only. See README for current UI.
+
 ## What
 
 macOS desktop app (Electron) that turns a desk into 4 programmable buttons using the

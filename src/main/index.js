@@ -18,7 +18,9 @@ function createWindow() {
       backgroundThrottling: false,
     },
   });
-  win.loadFile(join(__dirname, '../renderer/index.html'));
+  const forcedScreen = process.env.ASSEMBLE_SCREEN; // dev: jump straight to a screen
+  win.loadFile(join(__dirname, '../renderer/index.html'),
+    forcedScreen ? { hash: `screen=${forcedScreen}` } : {});
   win.on('close', e => {           // hide, keep mic running
     if (!app.isQuitting) { e.preventDefault(); win.hide(); }
   });

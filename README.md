@@ -1,8 +1,10 @@
 # assemble ◉
 
-**Your desk is the keyboard.** Four corners of your desk become four programmable buttons — no hardware, just the microphone.
+**Your desk is the keyboard.** Four corners of your desk become four programmable buttons — no extra hardware, just the microphone.
 
 Tap a corner. The app hears it, figures out *which* corner, runs whatever you assigned there.
+
+![Main screen, dark theme](docs/screenshots/main-dark.png)
 
 ## How it works
 
@@ -15,20 +17,46 @@ One mic can't triangulate, but each desk corner *sounds different* at the mic �
 
 **Constraint:** the mic must stay where it was during teaching. Moved your laptop? Re-teach.
 
-## Install & run
+## Install
 
 ```bash
+git clone https://github.com/MananDesai54/assemble.git
+cd assemble
 npm install
 npm start
 ```
 
-First launch walks you through setup: mic check with a live meter, then teaching — tap each corner 10× as prompted, then 10 seconds of "noise you want ignored" (type, click, clap).
+Requires macOS. First launch asks for microphone access — allow it.
 
 If macOS claims "Electron.app contains malware": XProtect false-positive on stale Electron dev builds. `npm install --save-dev electron@latest`, then `node node_modules/electron/install.js`.
 
-## Assign actions
+## Usage guide
 
-Click a corner on the desk map:
+### 1. First run — setup
+
+![Welcome screen](docs/screenshots/welcome.png)
+
+Click **Set up**. Pick your microphone and tap the desk — the level meter should jump. If it doesn't, choose a different input or check System Settings → Privacy & Security → Microphone.
+
+### 2. Teach the corners
+
+![Teaching screen](docs/screenshots/teach.png)
+
+The highlighted corner on the desk map is the one to tap. Knock that corner of your **desk** 10 times with a knuckle, varying strength a little. The map mirrors your real desk; the dot in the middle is your mic.
+
+Made a mess of a corner? **Redo this corner**, **Previous corner**, and **Start over** are right under the count.
+
+After the four corners: the **ignore** phase. For ten seconds, make every sound that should NOT trigger anything — type, click, clap, set a mug down. Don't skip this; it's what stops random noise from firing your actions.
+
+**Teaching tips**
+
+- Tap the desk, not the laptop — chassis taps all sound identical at the mic and usually clip.
+- Corners far apart beat spots near each other. Wood desks work best.
+- Teach with the room in its normal state (music on if it's usually on).
+
+### 3. Assign actions
+
+Click a corner card:
 
 | Action | Value example | Notes |
 |---|---|---|
@@ -37,32 +65,33 @@ Click a corner on the desk map:
 | Press a shortcut | `cmd+shift+4` | needs Accessibility permission (System Settings → Privacy & Security) |
 | Open app or link | `https://github.com` or `/Applications/Spotify.app` | |
 
-## Interface
+### 4. Daily use
 
-- **Desk map** — the 2×2 grid mirrors your physical desk; the dot in the middle is the mic. Every detected sound ripples from the dot; a recognized tap lights its corner.
-- **Listening switch** (top right, also in the ◉ menubar item) — master arm/disarm.
-- **Themes** — ☀/☾ toggle; follows system by default.
-- Closing the window hides it; listening continues. Quit from the menubar.
+![Main screen, light theme](docs/screenshots/main-light.png)
 
-## Teaching tips
-
-- Tap the **desk**, not the laptop — laptop-chassis taps all sound identical at the mic (vibration travels straight through) and usually clip.
-- Corners far apart beat spots near each other. Wood desks work best.
-- Knuckle taps, moderate strength, vary slightly.
-- Don't skip the noise step — that's what teaches it to reject claps and typing.
+- Every sound the app hears ripples from the mic dot; a recognized tap lights its corner and shows up in **Activity** with its confidence.
+- **Listening** switch (top right, or the ◉ menubar item) is the master arm/disarm — flip it off for meetings.
+- **Sensitivity**: left = softer taps register; right = only hard knocks.
+- **☀/☾** toggles light/dark; follows your system by default.
+- Closing the window hides it — listening continues in the background. Quit from the menubar.
 
 ## Troubleshooting
 
-- **Wrong corner detected** — re-teach with more distinct corner positions.
-- **Taps missed** — sensitivity slider left (lower threshold = softer taps register).
-- **Random fires** — slider right, re-teach with a longer noise phase.
+| Symptom | Fix |
+|---|---|
+| Wrong corner detected | Re-teach; tap positions farther apart |
+| Taps missed | Sensitivity slider left |
+| Random fires | Slider right; re-teach with a longer, louder ignore phase |
+| "ignored a sound" for real taps | Re-teach — your tap now differs from the samples (mic moved, different knuckle) |
+| Meter dead | Wrong input device, or mic permission missing |
 
-## Manual test checklist
+## Development
 
-1. `npm test` → all green (23 tests).
-2. Launch, grant mic. ◉ appears in menubar.
-3. Onboarding: meter jumps on tap → teach 4 corners + noise phase.
-4. Assign `say "hello"` (Run a command) to top-left. Tap top-left → Mac speaks.
-5. Typing burst → Activity shows "ignored a sound".
-6. Uncheck Listening → taps do nothing; re-check → work again.
-7. Close window → tap still fires (background listening).
+```bash
+npm test                          # 24 unit tests (detector, fingerprint, classifier, actions, config)
+ASSEMBLE_SCREEN=teach npm start   # jump straight to a screen: welcome | mic | teach | main
+```
+
+Pure-DSP modules (`src/renderer/audio/`) have no Electron dependency — they run in Node under Vitest against synthesized tap fixtures.
+
+Config lives at `~/Library/Application Support/assemble/config.json` — delete it for a factory reset.
