@@ -15,14 +15,13 @@ export * from './store';
 let intake: SlackIntake | null = null;
 let startGen = 0;
 
-const tokens = (ctx: IntegrationContext) => ({
-  appToken: ctx.kv.get('slack_app_token') || process.env.SLACK_APP_TOKEN || '',
-  botToken: ctx.kv.get('slack_bot_token') || process.env.SLACK_BOT_TOKEN || '',
-});
+const userToken = (ctx: IntegrationContext) =>
+  ctx.kv.get('slack_user_token') || process.env.SLACK_USER_TOKEN || '';
 
 const readyLlm = async (ctx: IntegrationContext) => (await ctx.llm()) as Llm | null;
 
 async function scoreInBackground(ctx: IntegrationContext, id: number, m: EnrichedMessage) {
+  if (m.isSelf) return; // your own messages are never "urgent" pings
   const llm = await readyLlm(ctx);
   if (!llm) return;
   try {
@@ -54,29 +53,29 @@ export async function runDigest(ctx: IntegrationContext): Promise<{ summary: str
 export const slackIntegration: IntegrationManifest = {
   id: 'slack',
   name: 'Slack',
-  description: 'Messages captured locally — urgency pings, digests, drafted replies.',
+  description: 'Reads the channels and DMs you are in, as you — urgency pings, digests, drafted replies. All stored locally.',
   icon: '<svg class="brand" viewBox="0 0 122.8 122.8"><path d="M25.8 77.6c0 7.1-5.8 12.9-12.9 12.9S0 84.7 0 77.6s5.8-12.9 12.9-12.9h12.9v12.9zm6.5 0c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9v32.3c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V77.6z" fill="#E01E5A"/><path d="M45.2 25.8c-7.1 0-12.9-5.8-12.9-12.9S38.1 0 45.2 0s12.9 5.8 12.9 12.9v12.9H45.2zm0 6.5c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H12.9C5.8 58.1 0 52.3 0 45.2s5.8-12.9 12.9-12.9h32.3z" fill="#36C5F0"/><path d="M97 45.2c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9-5.8 12.9-12.9 12.9H97V45.2zm-6.5 0c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V12.9C64.7 5.8 70.5 0 77.6 0s12.9 5.8 12.9 12.9v32.3z" fill="#2EB67D"/><path d="M77.6 97c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9-12.9-5.8-12.9-12.9V97h12.9zm0-6.5c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.6z" fill="#ECB22E"/></svg>',
   connectFields: [
-    { key: 'slack_app_token', label: 'App token', placeholder: 'xapp-… app-level token', secret: true, help: 'api.slack.com → your app → Socket Mode on. Needs connections:write.' },
-    { key: 'slack_bot_token', label: 'Bot token', placeholder: 'xoxb-… bot token', secret: true, help: 'Invite the bot to channels you want captured.' },
+    { key: 'slack_user_token', label: 'User token', placeholder: 'xoxp-… user OAuth token', secret: true, help: 'api.slack.com → your app → OAuth & Permissions → User OAuth Token. Reads what you can read — no bot invites, no extra setup. Old messages are backfilled on connect.' },
   ],
 
   async status() {
-    return intake ? { connected: true, detail: 'socket open' } : { connected: false };
+    return intake ? { connected: true, detail: 'polling your conversations' } : { connected: false };
   },
 
   async start(ctx) {
     await this.stop();
-    const { appToken, botToken } = tokens(ctx);
-    if (!appToken || !botToken) throw new Error('Slack tokens missing');
+    const token = userToken(ctx);
+    if (!token) throw new Error('Slack user token missing');
     const db = ctx.db as Database;
     ensureSlackTables(db);
     const gen = ++startGen;
     const fresh = await startSlack({
-      appToken, botToken,
+      userToken: token,
       onMessage: m => {
         const id = insertMessage(db, m);
         if (id === null) return;
+        if (!m.live) return; // backfilled history: store silently, no pings/feed spam
         console.log(`[${m.channelName ?? m.channel}] ${m.userName ?? m.user}: ${m.text.slice(0, 80)}`);
         ctx.broadcast({ kind: 'slack-message', message: m });
         void scoreInBackground(ctx, id, m);
@@ -125,11 +124,12 @@ export const slackIntegration: IntegrationManifest = {
     });
 
     app.post('/send', async c => {
-      const { botToken } = tokens(ctx);
-      if (!botToken) return c.json({ error: 'Slack not connected — open Setup' }, 503);
+      const token = userToken(ctx);
+      if (!token) return c.json({ error: 'Slack not connected — open Settings → Integrations' }, 503);
       const { channel, text, threadTs } = await c.req.json<{ channel: string; text: string; threadTs?: string }>();
       if (!channel || !text) return c.json({ error: 'channel and text required' }, 400);
-      const res = await new WebClient(botToken).chat.postMessage({ channel, text, ...(threadTs ? { thread_ts: threadTs } : {}) });
+      // user token → the reply posts as you, not as a bot
+      const res = await new WebClient(token).chat.postMessage({ channel, text, ...(threadTs ? { thread_ts: threadTs } : {}) });
       return c.json({ ok: res.ok, ts: res.ts });
     });
 

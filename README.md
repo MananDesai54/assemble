@@ -144,7 +144,7 @@ packages/actions  action model + macOS executor
 packages/llm      llama-server client + prompts (urgency, digest, drafts)
 packages/stt      whisper.cpp wrapper (local speech-to-text)
 packages/integrations       pluggable third-party connectors — hidden until connected
-packages/integrations/slack   Socket Mode intake, digests, drafts + manifest
+packages/integrations/slack   user-token polling intake, digests, drafts + manifest
 packages/integrations/linear  assigned issues + manifest
 ```
 
@@ -186,10 +186,14 @@ and drafts are sent to that provider.
 
 ### Slack
 
-Paste your tokens into onboarding's **Connect** step or Settings → Integrations (`xapp-…` app token with
-`connections:write` + `xoxb-…` bot token; Socket Mode enabled on the app — no public
-URL needed). The catalog shows each service; sidebar entries appear only when connected. Bot must be invited to channels you want captured. `.env` values work as
-a fallback for headless runs.
+Paste your **user token** (`xoxp-…`, api.slack.com → your app → OAuth & Permissions →
+User OAuth Token) into onboarding's **Connect** step or Settings → Integrations. It reads
+what *you* can read — every channel and DM you're in, no bot invites, no Socket Mode, no
+public URL. On connect, recent history is backfilled locally; new messages arrive by
+polling (~45 s). DMs need the `im:read` user scope on your app — without it they're
+skipped automatically. Drafted replies post as you. `.env` (`SLACK_USER_TOKEN`) works as
+a fallback for headless runs. The catalog shows each service; sidebar entries appear only
+when connected.
 
 ### Voice commands
 

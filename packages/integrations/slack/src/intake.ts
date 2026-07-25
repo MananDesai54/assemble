@@ -1,4 +1,3 @@
-import { SocketModeClient } from '@slack/socket-mode';
 import { WebClient } from '@slack/web-api';
 
 export interface NormalizedMessage {
@@ -14,22 +13,31 @@ export interface NormalizedMessage {
 export interface EnrichedMessage extends NormalizedMessage {
   userName: string | null;
   channelName: string | null;
+  /** Message written by the token's owner — callers skip urgency pings for these. */
+  isSelf?: boolean;
+  /** False during the initial backfill sweep — callers skip pings/broadcasts for history. */
+  live?: boolean;
 }
 
-// Pure: Slack event → normalized message, or null for non-message noise.
-// Skips subtypes (edits, joins, bot noise) except thread broadcasts.
-export function normalizeEvent(event: any, teamId?: string): NormalizedMessage | null {
-  if (!event || event.type !== 'message') return null;
-  if (event.subtype && event.subtype !== 'thread_broadcast') return null;
-  if (!event.text || !event.ts || !event.channel) return null;
+// Pure: one conversations.history entry → normalized message, or null for
+// noise (joins, edits, bot housekeeping). Thread broadcasts kept.
+export function normalizeHistoryMessage(
+  msg: any,
+  channel: string,
+  channelType: string | null,
+  team?: string | null,
+): NormalizedMessage | null {
+  if (!msg || msg.type !== 'message') return null;
+  if (msg.subtype && msg.subtype !== 'thread_broadcast') return null;
+  if (!msg.text || !msg.ts) return null;
   return {
-    slackTs: String(event.ts),
-    channel: String(event.channel),
-    channelType: event.channel_type ?? null,
-    user: event.user ?? null,
-    text: String(event.text),
-    threadTs: event.thread_ts ?? null,
-    team: teamId ?? event.team ?? null,
+    slackTs: String(msg.ts),
+    channel,
+    channelType,
+    user: msg.user ?? null,
+    text: String(msg.text),
+    threadTs: msg.thread_ts ?? null,
+    team: team ?? null,
   };
 }
 
@@ -37,35 +45,81 @@ export interface SlackIntake {
   stop: () => Promise<void>;
 }
 
+interface Convo {
+  id: string;
+  name: string | null;
+  type: 'channel' | 'group' | 'im' | 'mpim';
+}
+
+// Widest type set the token's scopes allow — im needs im:read, mpim needs
+// mpim:read; degrade instead of failing the whole connect.
+const TYPE_SETS = [
+  'public_channel,private_channel,im,mpim',
+  'public_channel,private_channel,mpim',
+  'public_channel,private_channel',
+];
+
+async function listConversations(web: WebClient): Promise<Convo[]> {
+  for (const types of TYPE_SETS) {
+    try {
+      const out: Convo[] = [];
+      let cursor: string | undefined;
+      do {
+        const r: any = await web.users.conversations({ types, limit: 200, exclude_archived: true, cursor });
+        for (const c of r.channels ?? []) {
+          out.push({
+            id: String(c.id),
+            name: c.is_im ? null : (c.name ?? null),
+            type: c.is_im ? 'im' : c.is_mpim ? 'mpim' : c.is_private ? 'group' : 'channel',
+          });
+        }
+        cursor = r.response_metadata?.next_cursor || undefined;
+      } while (cursor);
+      return out;
+    } catch (err) {
+      if ((err as any)?.data?.error === 'missing_scope' && types !== TYPE_SETS[TYPE_SETS.length - 1]) continue;
+      throw err;
+    }
+  }
+  return [];
+}
+
+/**
+ * Poll-based intake on a user token (xoxp): reads every conversation the
+ * user is a member of — no bot invites, no Socket Mode, no public URL.
+ * First sweep backfills history; later sweeps fetch only newer messages.
+ * Duplicate delivery is fine — the store dedupes on (channel, ts).
+ */
 export async function startSlack({
-  appToken,
-  botToken,
+  userToken,
   onMessage,
   log = console.log,
+  pollMs = 45_000,
+  backfillLimit = 100,
 }: {
-  appToken: string;
-  botToken: string;
+  userToken: string;
   onMessage: (m: EnrichedMessage) => void;
   log?: (msg: string) => void;
+  pollMs?: number;
+  backfillLimit?: number;
 }): Promise<SlackIntake> {
-  // Fail fast on the wrong token type — a non-xapp token makes socket.start()
-  // hang forever instead of erroring.
-  if (!appToken.startsWith('xapp-')) {
-    throw new Error('app token must start with xapp- (App-Level Token with connections:write — api.slack.com → your app → Basic Information)');
+  if (!userToken.startsWith('xoxp-')) {
+    throw new Error('user token must start with xoxp- (api.slack.com → your app → OAuth & Permissions → User OAuth Token)');
   }
-  if (!botToken.startsWith('xoxb-')) {
-    throw new Error('bot token must start with xoxb- (OAuth → Bot User OAuth Token)');
-  }
-  const socket = new SocketModeClient({ appToken });
-  const web = new WebClient(botToken);
+  const web = new WebClient(userToken);
+  let auth: any;
   try {
-    await web.auth.test(); // verify the bot token before opening the socket
+    auth = await web.auth.test();
   } catch (err) {
-    throw new Error(`bot token rejected by Slack: ${(err as Error).message}`);
+    throw new Error(`token rejected by Slack: ${(err as Error).message}`);
   }
-  const userNames = new Map<string, string | null>();
-  const channelNames = new Map<string, string | null>();
+  const team: string | null = auth.team_id ?? null;
+  const self = String(auth.user_id ?? '');
 
+  let convos = await listConversations(web);
+  log(`slack: watching ${convos.length} conversations as ${auth.user ?? self}`);
+
+  const userNames = new Map<string, string | null>();
   async function userName(id: string | null): Promise<string | null> {
     if (!id) return null;
     if (!userNames.has(id)) {
@@ -77,38 +131,55 @@ export async function startSlack({
     return userNames.get(id) ?? null;
   }
 
-  async function channelName(id: string): Promise<string | null> {
-    if (!channelNames.has(id)) {
-      try {
-        const r = await web.conversations.info({ channel: id });
-        channelNames.set(id, r.channel?.name ?? null);
-      } catch { channelNames.set(id, null); }
-    }
-    return channelNames.get(id) ?? null;
-  }
+  const lastSeen = new Map<string, string>(); // channel id → newest ts already fetched
+  let stopped = false;
+  let ticking = false;
+  let tick = 0;
+  let live = false; // flips true once the backfill sweep finishes
 
-  socket.on('message', async ({ event, body, ack }: any) => {
-    await ack();
-    const norm = normalizeEvent(event, body?.team_id);
-    if (!norm) return;
-    onMessage({
-      ...norm,
-      userName: await userName(norm.user),
-      channelName: norm.channelType === 'im' ? 'DM' : await channelName(norm.channel),
+  async function pollChannel(c: Convo) {
+    const oldest = lastSeen.get(c.id);
+    const r: any = await web.conversations.history({
+      channel: c.id,
+      limit: oldest ? 50 : backfillLimit,
+      ...(oldest ? { oldest } : {}), // exclusive — only strictly newer messages
     });
-  });
-
-  socket.on('connected', () => log('slack: socket connected'));
-  socket.on('disconnected', () => log('slack: socket disconnected'));
-  try {
-    await Promise.race([
-      socket.start(),
-      new Promise((_, reject) => setTimeout(() =>
-        reject(new Error('Slack socket timed out — enable Socket Mode on the app and check the xapp token has connections:write')), 15_000)),
-    ]);
-  } catch (err) {
-    await socket.disconnect().catch(() => {});
-    throw err;
+    const newest = r.messages?.[0]?.ts;
+    for (const raw of (r.messages ?? []).slice().reverse()) {
+      const norm = normalizeHistoryMessage(raw, c.id, c.type, team);
+      if (!norm) continue;
+      onMessage({
+        ...norm,
+        userName: await userName(norm.user),
+        channelName: c.type === 'im' ? 'DM' : c.name,
+        isSelf: norm.user === self,
+        live,
+      });
+    }
+    if (newest && (!oldest || newest > oldest)) lastSeen.set(c.id, String(newest));
   }
-  return { stop: () => socket.disconnect() };
+
+  async function poll() {
+    if (stopped || ticking) return; // never overlap sweeps
+    ticking = true;
+    try {
+      tick++;
+      if (tick % 20 === 0) convos = await listConversations(web).catch(() => convos);
+      for (const c of convos) {
+        if (stopped) break;
+        await pollChannel(c).catch(err =>
+          log(`slack: poll ${c.name ?? c.id} failed — ${(err as any)?.data?.error ?? (err as Error).message}`));
+      }
+    } finally {
+      ticking = false;
+    }
+  }
+
+  // Backfill runs in the background — connect returns as soon as the token
+  // and conversation list check out. Overlap is prevented by `ticking`.
+  void poll().then(() => { live = true; log('slack: backfill done'); });
+  const timer = setInterval(() => void poll(), pollMs);
+  return {
+    stop: async () => { stopped = true; clearInterval(timer); },
+  };
 }
