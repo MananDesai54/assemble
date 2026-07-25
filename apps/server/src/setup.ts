@@ -102,7 +102,9 @@ export function toolStatus(whisperModelPath: string): Omit<SetupStatus, 'llmRunn
     llamaCpp: has('llama-server'),
     whisperCpp: has('whisper-cli'),
     whisperModel: existsSync(whisperModelPath) && statSync(whisperModelPath).size > 300_000_000,
-    audiotap: existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN),
+    audiotap: process.platform === 'linux'
+      ? has('ffmpeg')
+      : existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN),
     swiftc: has('swiftc'),
   };
 }
@@ -166,6 +168,11 @@ export async function runSetupStep(
       onLine('downloading speech model…');
       return downloadWithProgress(whisperModelUrl, whisperModelPath, onLine);
     case 'audiotap': {
+      if (process.platform === 'linux') {
+        if (!has('ffmpeg')) throw new Error('ffmpeg required — e.g. sudo apt install ffmpeg');
+        onLine('ffmpeg present — mic recording ready (system-audio capture is macOS-only for now)');
+        return;
+      }
       if (existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN)) { onLine('already built'); return; }
       if (!has('swiftc')) throw new Error('Xcode Command Line Tools required — run: xcode-select --install');
       if (!existsSync(AUDIOTAP_BIN)) {

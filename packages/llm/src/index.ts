@@ -7,6 +7,8 @@ export interface LlmOptions {
   url?: string;
   fetchFn?: typeof fetch;
   model?: string;
+  /** BYOK: bearer token for OpenAI-compatible cloud endpoints. */
+  apiKey?: string;
 }
 
 export interface MessageLike {
@@ -19,19 +21,31 @@ export interface MessageLike {
 export class Llm {
   url: string;
   model: string;
+  apiKey: string;
   private fetchFn: typeof fetch;
 
   constructor({ url = process.env.ASSEMBLE_LLM_URL || 'http://127.0.0.1:4820',
-                fetchFn = fetch, model = 'local' }: LlmOptions = {}) {
+                fetchFn = fetch, model = 'local', apiKey = '' }: LlmOptions = {}) {
     this.url = url.replace(/\/$/, '');
     this.fetchFn = fetchFn;
     this.model = model;
+    this.apiKey = apiKey;
+  }
+
+  /** Base may or may not already include the /v1 (or /openai compat) segment. */
+  private endpoint(): string {
+    return /\/(v1|v1beta\/openai|openai)$/.test(this.url)
+      ? `${this.url}/chat/completions`
+      : `${this.url}/v1/chat/completions`;
   }
 
   async chat(messages: ChatMessage[], { maxTokens = 512, temperature = 0.4 } = {}): Promise<string> {
-    const res = await this.fetchFn(`${this.url}/v1/chat/completions`, {
+    const res = await this.fetchFn(this.endpoint(), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+      },
       body: JSON.stringify({ model: this.model, messages, max_tokens: maxTokens, temperature }),
     });
     if (!res.ok) throw new Error(`llm http ${res.status}`);

@@ -3,10 +3,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 // Everything the app stores lives under one user directory — never inside the
-// repo. macOS convention: ~/Library/Application Support/assemble
-// (same place the desktop config.json already lives). Override: ASSEMBLE_HOME.
-export const HOME_DIR = process.env.ASSEMBLE_HOME
-  || join(homedir(), 'Library', 'Application Support', 'assemble');
+// repo. macOS: ~/Library/Application Support/assemble (where the desktop
+// config.json already lives). Linux: $XDG_DATA_HOME/assemble or
+// ~/.local/share/assemble. Override: ASSEMBLE_HOME.
+const platformHome = () =>
+  process.platform === 'darwin'
+    ? join(homedir(), 'Library', 'Application Support', 'assemble')
+    : join(process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share'), 'assemble');
+export const HOME_DIR = process.env.ASSEMBLE_HOME || platformHome();
 export const DATA_DIR = join(HOME_DIR, 'data');
 export const MODELS_DIR = join(HOME_DIR, 'models');
 export const BIN_DIR = join(HOME_DIR, 'bin');

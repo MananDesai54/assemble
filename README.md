@@ -29,7 +29,7 @@ bun install
 bun start
 ```
 
-Requires macOS + [Bun](https://bun.sh). That's the whole setup — the app starts its own
+Requires macOS or Linux + [Bun](https://bun.sh). (Linux: keystrokes need `xdotool`, recording needs `ffmpeg`; call recording captures mic only — system-audio capture is macOS-only for now. The Cmd+Shift chord is macOS-only; use Ctrl+Shift+Space.) That's the whole setup — the app starts its own
 local server and walks you through everything else (mic, teaching, AI engines, Slack)
 in the onboarding.
 
@@ -139,6 +139,14 @@ No cloud AI, ever. Everything runs on this Mac. With the brain on:
 - **Urgent pings** — every captured Slack message is triaged locally; genuinely urgent ones raise a macOS notification.
 - **Digest** — button on the Slack page summarizes everything since your last digest.
 - **Draft replies** — click any message → local draft → edit → "Send to Slack". Nothing sends without your click.
+
+### Bring your own key (optional)
+
+Settings → Local AI → Brain source. Default is **local** (private). Switch to
+**Your API key** for any OpenAI-compatible provider — OpenAI, OpenRouter, Groq,
+Gemini, Anthropic's compat endpoint — with base URL + key + model id and a live
+test button. Clearly flagged in the UI: with BYOK, Slack messages, transcripts,
+and drafts are sent to that provider.
 
 ### Slack
 

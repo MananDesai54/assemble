@@ -995,11 +995,65 @@ interface ModelOption {
 }
 
 async function renderModelSelectors(container: HTMLElement) {
-  let data: { whisper: { options: ModelOption[]; selected: string }; llm: { options: ModelOption[]; selected: string } };
+  let data: {
+    whisper: { options: ModelOption[]; selected: string };
+    llm: { options: ModelOption[]; selected: string };
+    byok: { source: 'local' | 'byok'; url: string; model: string; hasKey: boolean };
+  };
   try {
     data = await (await fetch(`${SERVER}/setup/models`)).json();
   } catch { return; }
   container.innerHTML = '';
+
+  // brain source: local vs bring-your-own-key
+  const src = document.createElement('div');
+  src.className = 'model-select';
+  src.innerHTML = `
+    <div class="model-head"><b>Brain source</b><span class="hint">Where AI thinking happens.</span></div>
+    <label class="switch"><input type="radio" name="brain-src" value="local" ${data.byok.source === 'local' ? 'checked' : ''}/>
+      <span><b>Local</b> — runs on this Mac, nothing leaves your machine (recommended)</span></label>
+    <label class="switch"><input type="radio" name="brain-src" value="byok" ${data.byok.source === 'byok' ? 'checked' : ''}/>
+      <span><b>Your API key</b> — any OpenAI-compatible provider (OpenAI, OpenRouter, Groq, Gemini…)</span></label>
+    <div class="byok-fields" ${data.byok.source === 'byok' ? '' : 'hidden'}>
+      <span class="hint" style="color:var(--danger)">Heads up: Slack messages, call transcripts, and drafts will be sent to this provider.</span>
+      <input id="byok-url" placeholder="Base URL — e.g. https://api.openai.com or https://openrouter.ai/api/v1" value="${data.byok.url}" />
+      <input id="byok-key" type="password" placeholder="${data.byok.hasKey ? 'API key saved — paste to replace' : 'API key (sk-…)'}" />
+      <input id="byok-model" placeholder="Model id — e.g. gpt-5-mini, anthropic/claude-sonnet-5" value="${data.byok.model}" />
+      <button class="secondary" id="byok-save">Save & test</button>
+      <span id="byok-status" class="hint"></span>
+    </div>`;
+  container.appendChild(src);
+  const byokFields = src.querySelector('.byok-fields') as HTMLElement;
+  src.querySelectorAll('input[name="brain-src"]').forEach(el => {
+    (el as HTMLInputElement).onchange = async (e: any) => {
+      const source = e.target.value;
+      byokFields.hidden = source !== 'byok';
+      await fetch(`${SERVER}/setup/byok`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source }),
+      });
+      if (source === 'local') toast('Brain: local — private.');
+    };
+  });
+  (src.querySelector('#byok-save') as HTMLElement).onclick = async () => {
+    const status = src.querySelector('#byok-status') as HTMLElement;
+    status.textContent = 'Testing…';
+    try {
+      const r = await fetch(`${SERVER}/setup/byok`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source: 'byok',
+          url: (src.querySelector('#byok-url') as HTMLInputElement).value.trim(),
+          key: (src.querySelector('#byok-key') as HTMLInputElement).value.trim() || undefined,
+          model: (src.querySelector('#byok-model') as HTMLInputElement).value.trim(),
+        }),
+      });
+      const res = await r.json();
+      status.textContent = res.ok ? `Connected — replied "${res.sample}".` : `Failed: ${res.error}`;
+    } catch {
+      status.textContent = 'Local server unreachable.';
+    }
+  };
   const groups: { key: 'whisper' | 'llm'; title: string; hint: string }[] = [
     { key: 'whisper', title: 'Speech model', hint: 'Transcribes calls and voice commands. Auto-detects English / Hindi / Hinglish.' },
     { key: 'llm', title: 'Brain model', hint: 'Powers Slack triage, digests, drafts, call summaries, voice intents.' },

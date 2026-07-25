@@ -1,6 +1,21 @@
 import { describe, it, expect } from 'vitest';
 import { buildCommand, executeAction, SYSTEM_PRESETS } from '@assemble/actions';
 
+describe('buildCommand (linux)', () => {
+  it('keystroke maps cmd to super via xdotool', () => {
+    expect(buildCommand({ type: 'keystroke', value: 'cmd+shift+4' }, 'linux'))
+      .toBe(`xdotool key --clearmodifiers 'super+shift+4'`);
+  });
+
+  it('open uses xdg-open', () => {
+    expect(buildCommand({ type: 'open', value: 'https://x.com' }, 'linux')).toBe("xdg-open 'https://x.com'");
+  });
+
+  it('volume preset uses pactl', () => {
+    expect(buildCommand({ type: 'system', value: 'volume-up' }, 'linux')).toContain('pactl');
+  });
+});
+
 describe('buildCommand', () => {
   it('shell passes through', () => {
     expect(buildCommand({ type: 'shell', value: 'say assemble' })).toBe('say assemble');

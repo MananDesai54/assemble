@@ -1,15 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { Llm, scoreUrgency, digestMessages, draftReply, summarizeCall, parseIntent } from '../src/index';
 
-function fakeLlm(reply: string, calls: any[] = []) {
+function fakeLlm(reply: string, calls: any[] = [], opts: Record<string, string> = {}) {
   const fetchFn = async (url: string, init?: any) => {
-    calls.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+    calls.push({ url, headers: init?.headers, body: init?.body ? JSON.parse(init.body) : null });
     return {
       ok: true,
       json: async () => ({ choices: [{ message: { content: reply } }] }),
     } as Response;
   };
-  return { llm: new Llm({ url: 'http://test', fetchFn: fetchFn as any }), calls };
+  return { llm: new Llm({ url: 'http://test', fetchFn: fetchFn as any, ...opts }), calls };
 }
 
 describe('Llm.chat', () => {
@@ -19,6 +19,21 @@ describe('Llm.chat', () => {
     expect(out).toBe('hello back');
     expect(calls[0].url).toBe('http://test/v1/chat/completions');
     expect(calls[0].body.messages[0].content).toBe('hi');
+  });
+
+  it('BYOK: bearer header, model id, no double /v1', async () => {
+    const calls: any[] = [];
+    const llm = new Llm({
+      url: 'https://api.example.com/v1', apiKey: 'sk-test', model: 'gpt-5-mini',
+      fetchFn: (async (url: string, init: any) => {
+        calls.push({ url, headers: init.headers, body: JSON.parse(init.body) });
+        return { ok: true, json: async () => ({ choices: [{ message: { content: 'ok' } }] }) } as Response;
+      }) as any,
+    });
+    await llm.chat([{ role: 'user', content: 'hi' }]);
+    expect(calls[0].url).toBe('https://api.example.com/v1/chat/completions');
+    expect(calls[0].headers.Authorization).toBe('Bearer sk-test');
+    expect(calls[0].body.model).toBe('gpt-5-mini');
   });
 });
 

@@ -33,7 +33,21 @@ const DB_PATH = process.env.ASSEMBLE_DB || join(DATA_DIR, 'assemble.db');
 migrateRepoLocalStorage();
 const db = openDb(DB_PATH);
 initAgentTables(db);
-const llm = new Llm();
+
+// Brain source: local llama-server by default; BYOK = any OpenAI-compatible
+// endpoint with the user's own key (content then leaves the machine).
+const byokConfig = () => ({
+  source: (kvGet(db, 'llm_source') || 'local') as 'local' | 'byok',
+  url: kvGet(db, 'byok_url') || 'https://api.openai.com',
+  key: kvGet(db, 'byok_key') || '',
+  model: kvGet(db, 'byok_model') || '',
+});
+function buildLlm(): Llm {
+  const b = byokConfig();
+  if (b.source === 'byok' && b.key) return new Llm({ url: b.url, apiKey: b.key, model: b.model || 'gpt-5-mini' });
+  return new Llm();
+}
+let llm = buildLlm();
 const llmRuntime = new LlmRuntime();
 const recorder = new Recorder({ binPath: AUDIOTAP_BIN, dir: RECORDINGS_DIR });
 const agents = new AgentRunner();
@@ -58,6 +72,8 @@ const webClient = () => {
 let llmOk = false;
 let llmCheckedAt = 0;
 async function llmReady(): Promise<boolean> {
+  const b = byokConfig();
+  if (b.source === 'byok') return Boolean(b.key); // no health endpoint guarantee — errors surface per call
   if (Date.now() - llmCheckedAt > 15_000) {
     llmOk = await llm.healthy();
     llmCheckedAt = Date.now();
@@ -90,10 +106,35 @@ app.get('/setup/status', async c => {
   });
 });
 
-app.get('/setup/models', c => c.json({
-  whisper: { options: WHISPER_MODELS, selected: selectedWhisper() },
-  llm: { options: LLM_MODELS, selected: selectedLlm() },
-}));
+app.get('/setup/models', c => {
+  const b = byokConfig();
+  return c.json({
+    whisper: { options: WHISPER_MODELS, selected: selectedWhisper() },
+    llm: { options: LLM_MODELS, selected: selectedLlm() },
+    byok: { source: b.source, url: b.url, model: b.model, hasKey: Boolean(b.key) },
+  });
+});
+
+app.post('/setup/byok', async c => {
+  const { source, url, key, model } = await c.req.json<{ source?: string; url?: string; key?: string; model?: string }>();
+  if (source === 'local' || source === 'byok') kvSet(db, 'llm_source', source);
+  if (url !== undefined) kvSet(db, 'byok_url', url.trim().replace(/\/$/, ''));
+  if (key) kvSet(db, 'byok_key', key.trim());
+  if (model !== undefined) kvSet(db, 'byok_model', model.trim());
+  llm = buildLlm();
+  llmCheckedAt = 0;
+  const b = byokConfig();
+  if (b.source === 'byok') {
+    if (!b.key) return c.json({ ok: false, error: 'API key required' });
+    try {
+      const out = await llm.chat([{ role: 'user', content: 'Reply with the single word: ok' }], { maxTokens: 10 });
+      return c.json({ ok: true, sample: out.slice(0, 40) });
+    } catch (err) {
+      return c.json({ ok: false, error: (err as Error).message });
+    }
+  }
+  return c.json({ ok: true });
+});
 
 app.post('/setup/models', async c => {
   const { whisper, llm: llmId } = await c.req.json<{ whisper?: string; llm?: string }>();

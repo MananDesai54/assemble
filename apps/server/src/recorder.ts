@@ -26,7 +26,17 @@ export class Recorder {
     mkdirSync(this.dir, { recursive: true });
     const startedAt = new Date().toISOString();
     const wavPath = join(this.dir, `call-${startedAt.replace(/[:.]/g, '-')}.wav`);
-    this.proc = spawn(this.binPath, [wavPath], { stdio: ['ignore', 'inherit', 'inherit'] });
+    if (process.platform === 'linux') {
+      // mic via PulseAudio/PipeWire default source; system-audio mixing TBD on Linux
+      if (Bun.which('ffmpeg') === null) throw new Error('ffmpeg required on Linux — install it via your package manager');
+      this.proc = spawn('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error',
+        '-f', 'pulse', '-i', 'default',
+        '-ac', '1', '-ar', '16000', '-y', wavPath,
+      ], { stdio: ['ignore', 'inherit', 'inherit'] });
+    } else {
+      this.proc = spawn(this.binPath, [wavPath], { stdio: ['ignore', 'inherit', 'inherit'] });
+    }
     this.current = { wavPath, startedAt };
     this.proc.on('exit', () => { this.proc = null; this.current = null; });
     return this.current;
