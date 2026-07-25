@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { normalizeEvent } from '../src/slack';
+import { normalizeEvent } from '../src/intake';
 
 const base = { type: 'message', ts: '123.456', channel: 'C1', channel_type: 'channel', user: 'U1', text: 'hello' };
 

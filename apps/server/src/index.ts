@@ -7,12 +7,14 @@ import { transcribe } from '@assemble/stt';
 import { executeAction } from '@assemble/actions';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import {
-  openDb, insertMessage, recentMessages, setUrgency,
-  messagesAfter, channelMessages, lastMessageId, kvGet, kvSet,
+  openDb, kvGet, kvSet,
   insertRecording, updateRecording, listRecordings, getRecording,
 } from './db';
 import { myIssues } from '@assemble/linear';
-import { startSlack, type SlackIntake } from './slack';
+import {
+  startSlack, type SlackIntake, ensureSlackTables, insertMessage, recentMessages,
+  setUrgency, messagesAfter, channelMessages, lastMessageId,
+} from '@assemble/integration-slack';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
 import { existsSync, rmSync } from 'node:fs';
 import { notifyMac } from './notify';
@@ -32,6 +34,7 @@ const DB_PATH = process.env.ASSEMBLE_DB || join(DATA_DIR, 'assemble.db');
 
 migrateRepoLocalStorage();
 const db = openDb(DB_PATH);
+ensureSlackTables(db); // interim — Task 4 moves this into route mounting
 initAgentTables(db);
 
 // Brain source: local llama-server by default; BYOK = any OpenAI-compatible

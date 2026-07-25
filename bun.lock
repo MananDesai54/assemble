@@ -30,6 +30,7 @@
       "dependencies": {
         "@assemble/actions": "workspace:*",
         "@assemble/core": "workspace:*",
+        "@assemble/integration-slack": "workspace:*",
         "@assemble/linear": "workspace:*",
         "@assemble/llm": "workspace:*",
         "@assemble/stt": "workspace:*",
@@ -56,6 +57,17 @@
         "@assemble/core": "workspace:*",
       },
     },
+    "packages/integrations/slack": {
+      "name": "@assemble/integration-slack",
+      "version": "0.1.0",
+      "dependencies": {
+        "@assemble/core": "workspace:*",
+        "@assemble/llm": "workspace:*",
+        "@slack/socket-mode": "^2.0.0",
+        "@slack/web-api": "^7.0.0",
+        "hono": "^4.0.0",
+      },
+    },
     "packages/linear": {
       "name": "@assemble/linear",
       "version": "0.1.0",
@@ -77,6 +89,8 @@
     "@assemble/desktop": ["@assemble/desktop@workspace:apps/desktop"],
 
     "@assemble/dsp": ["@assemble/dsp@workspace:packages/dsp"],
+
+    "@assemble/integration-slack": ["@assemble/integration-slack@workspace:packages/integrations/slack"],
 
     "@assemble/linear": ["@assemble/linear@workspace:packages/linear"],
 

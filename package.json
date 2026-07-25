@@ -3,9 +3,10 @@
   "version": "0.2.0",
   "description": "Your desk is the input device — local-first gestures, voice, Slack, and calls turned into programmable actions.",
   "private": true,
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": ["apps/*", "packages/*", "packages/integrations/*"],
   "scripts": {
     "test": "vitest run",
+    "test:bun": "bun test apps/server/tests-bun packages/integrations/slack/tests-bun",
     "typecheck": "tsc --noEmit",
     "start": "bun run --cwd apps/desktop start",
     "server": "bun run apps/server/src/index.ts"

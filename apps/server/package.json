@@ -10,6 +10,7 @@
   "dependencies": {
     "@assemble/actions": "workspace:*",
     "@assemble/core": "workspace:*",
+    "@assemble/integration-slack": "workspace:*",
     "@assemble/linear": "workspace:*",
     "@assemble/llm": "workspace:*",
     "@assemble/stt": "workspace:*",
