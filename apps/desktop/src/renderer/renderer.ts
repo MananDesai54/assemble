@@ -1174,7 +1174,7 @@ async function renderIntegrationsCatalog(container: HTMLElement) {
       try {
         await fetch(`${SERVER}/integrations/${info.id}/disconnect`, { method: 'POST' });
         await fetchIntegrations();
-        if (state.mode === 'app') { renderApp(); if (state.page === 'settings') void renderIntegrationsCatalog($('#tab-body')); }
+        if (state.mode === 'app') renderApp();
         else void renderIntegrationsCatalog(container);
       } catch { status.textContent = 'Local server unreachable.'; }
     };
