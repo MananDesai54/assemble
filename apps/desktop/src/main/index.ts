@@ -110,9 +110,8 @@ app.whenReady().then(() => {
     win.webContents.send('voice-toggle');
   });
 
-  // quick-ask panel, from anywhere
-  globalShortcut.register('Alt+Space', toggleQuickPanel);
-
+  // quick-ask panel opens via Fn+Space only (keywatch → server WS → renderer →
+  // quick:toggle). No Alt+Space fallback — it collides with Raycast.
   ipcMain.on('quick:hide', () => quickWin?.hide());
   ipcMain.on('quick:toggle', toggleQuickPanel); // Fn+Space arrives via keywatch → server WS → renderer
   ipcMain.on('quick:resize', (_e, h: number) => {

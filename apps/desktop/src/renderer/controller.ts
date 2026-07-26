@@ -58,8 +58,7 @@ export const SETUP_ROWS = [
 /* ================= boot ================= */
 
 export async function init() {
-  const canvas = document.querySelector('#bg') as HTMLCanvasElement;
-  setBg(startBackground(canvas));
+  setBg(startBackground(document.querySelector('#bg') as HTMLElement));
   app.config = await window.assemble.getConfig();
   if (app.config.classifier) app.classifier = TapClassifier.fromJSON(app.config.classifier);
   applyTheme();

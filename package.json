@@ -17,5 +17,8 @@
     "@types/node": "^26.1.1",
     "typescript": "^5.5.0",
     "vitest": "^2.0.0"
+  },
+  "dependencies": {
+    "ogl": "^1.0.11"
   }
 }

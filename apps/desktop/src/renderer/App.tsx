@@ -19,7 +19,7 @@ import { ConsentDialog } from './components/ConsentDialog';
 import { Switch } from './components/ui/switch';
 import {
   Sidebar, SidebarProvider, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarTrigger, SidebarInset,
+  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarTrigger, SidebarInset, SidebarHeader,
 } from './components/ui/sidebar';
 import { cn } from './lib/utils';
 
@@ -44,38 +44,52 @@ function statusInfo(): { state: string; text: string } {
   return app.config.armed ? { state: 'live', text: 'listening' } : { state: 'paused', text: 'paused' };
 }
 
-function Topbar() {
-  useApp();
-  const s = statusInfo();
+function ThemeButton() {
   const dark = document.documentElement.dataset.theme === 'dark';
   return (
-    <header className="glass relative z-10 flex items-center gap-3 px-4 py-2">
+    <button className="cursor-pointer rounded-lg border border-transparent px-2 py-1 text-[15px] text-dim hover:border-line hover:text-ink"
+      title="Switch theme" onClick={toggleTheme}>
+      {dark ? '☾' : '☀'}
+    </button>
+  );
+}
+
+// status + listening toggle live together in one control
+function ListeningControl() {
+  useApp();
+  const s = statusInfo();
+  return (
+    <div className={cn(
+      'flex items-center gap-2.5 rounded-full border border-line bg-panel/60 py-1.5 pl-3 pr-2',
+      'group-data-[collapsible=icon]/sidebar:flex-col group-data-[collapsible=icon]/sidebar:rounded-xl group-data-[collapsible=icon]/sidebar:p-2',
+    )}>
+      <button
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-xs text-dim group-data-[collapsible=icon]/sidebar:flex-none"
+        title={s.text}
+        onClick={() => { if (!app.engine && app.mode === 'app' && app.config.armed) { app.consentOpen = true; emit(); } }}
+      >
+        <span className={cn(
+          'size-2 shrink-0 rounded-full bg-dim',
+          s.state === 'live' && 'animate-[breathe_2.4s_ease-in-out_infinite] bg-ok shadow-[0_0_8px_var(--ok)]',
+          s.state === 'paused' && 'bg-acc',
+          s.state === 'error' && 'bg-danger',
+        )} />
+        <span className="truncate group-data-[collapsible=icon]/sidebar:hidden">{s.text}</span>
+      </button>
+      {app.mode === 'app' && (
+        <Switch checked={!!app.config?.armed} onCheckedChange={v => void window.assemble.setArmed(v)} />
+      )}
+    </div>
+  );
+}
+
+// only landing/setup show a top strip — the app shell keeps everything in the sidebar
+function Topbar() {
+  useApp();
+  return (
+    <header className="relative z-10 flex items-center gap-3 px-4 py-2">
       <LogoMark className="size-9 rounded-[10px]" />
-      {app.recording && <span className="animate-[breathe_1.2s_ease-in-out_infinite] text-xs font-bold tracking-[0.08em] text-danger">● REC</span>}
-      <div className="ml-auto flex items-center gap-3">
-        <button className="cursor-pointer rounded-lg border border-transparent px-2 py-1 text-[15px] text-dim hover:border-line hover:text-ink"
-          title="Switch theme" onClick={toggleTheme}>
-          {dark ? '☾' : '☀'}
-        </button>
-        {/* status + listening toggle live together in one control */}
-        <div className="flex items-center gap-2.5 rounded-full border border-line bg-panel/60 py-1.5 pl-3 pr-2">
-          <button
-            className="flex cursor-pointer items-center gap-1.5 text-xs text-dim"
-            onClick={() => { if (!app.engine && app.mode === 'app' && app.config.armed) { app.consentOpen = true; emit(); } }}
-          >
-            <span className={cn(
-              'size-2 rounded-full bg-dim',
-              s.state === 'live' && 'animate-[breathe_2.4s_ease-in-out_infinite] bg-ok shadow-[0_0_8px_var(--ok)]',
-              s.state === 'paused' && 'bg-acc',
-              s.state === 'error' && 'bg-danger',
-            )} />
-            <span>{s.text}</span>
-          </button>
-          {app.mode === 'app' && (
-            <Switch checked={!!app.config?.armed} onCheckedChange={v => void window.assemble.setArmed(v)} />
-          )}
-        </div>
-      </div>
+      <div className="ml-auto"><ThemeButton /></div>
     </header>
   );
 }
@@ -90,6 +104,14 @@ function Shell() {
   return (
     <SidebarProvider>
       <Sidebar>
+        <SidebarHeader>
+          <div className="flex items-center gap-2 px-1 pt-1">
+            <LogoMark className="size-8 shrink-0 rounded-lg" />
+            {app.recording && (
+              <span className="animate-[breathe_1.2s_ease-in-out_infinite] text-xs font-bold tracking-[0.08em] text-danger group-data-[collapsible=icon]/sidebar:hidden">● REC</span>
+            )}
+          </div>
+        </SidebarHeader>
         <SidebarContent>
           <SidebarGroup>
             <SidebarGroupLabel>Workspace</SidebarGroupLabel>
@@ -106,7 +128,11 @@ function Shell() {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <SidebarTrigger className="self-start" />
+          <ListeningControl />
+          <div className="flex items-center justify-between group-data-[collapsible=icon]/sidebar:flex-col group-data-[collapsible=icon]/sidebar:gap-1">
+            <ThemeButton />
+            <SidebarTrigger />
+          </div>
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>
@@ -132,7 +158,7 @@ export function App() {
   useEffect(() => { void init(); }, []);
   return (
     <div className="relative z-[1] flex h-full flex-col">
-      {app.mode !== 'landing' && app.mode !== 'loading' && <Topbar />}
+      {app.mode === 'setup' && <Topbar />}
       {app.mode === 'landing' && <Landing />}
       {app.mode === 'setup' && <Setup />}
       {app.mode === 'app' && <Shell />}
