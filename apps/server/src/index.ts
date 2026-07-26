@@ -15,7 +15,7 @@ import {
 } from './db';
 import { registry, listIntegrations, connectIntegration, disconnectIntegration, startConfigured, stopAll } from './integrations';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync, rmSync, statSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LiveTranscriber } from './live-stt';
@@ -526,17 +526,27 @@ if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
   llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf);
 }
 
-// global double-space hotkey (listen-only event tap; needs Input Monitoring)
+// global hotkeys via listen-only event tap (needs Input Monitoring):
+// Cmd+Shift chord → voice command, Fn+Space → quick-ask panel
 let keywatch: ReturnType<typeof spawn> | null = null;
 if (existsSync(KEYWATCH_BIN)) {
+  // pick up source changes without re-running setup
+  const src = join(process.cwd(), 'native/keywatch/main.swift');
+  try {
+    if (existsSync(src) && Bun.which('swiftc') && statSync(src).mtimeMs > statSync(KEYWATCH_BIN).mtimeMs) {
+      console.log('keywatch: source newer than binary — recompiling');
+      Bun.spawnSync(['swiftc', '-O', src, '-o', KEYWATCH_BIN]);
+    }
+  } catch { /* best effort */ }
   keywatch = spawn(KEYWATCH_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
   keywatch.stdout!.on('data', (buf: Buffer) => {
     for (const line of buf.toString().split('\n')) {
       if (line.trim() === 'voice-chord') broadcast({ kind: 'voice-hotkey' });
+      if (line.trim() === 'quick-chord') broadcast({ kind: 'quick-hotkey' });
     }
   });
   keywatch.stderr!.on('data', (buf: Buffer) => console.warn(buf.toString().trim()));
-  keywatch.on('exit', code => console.warn(`keywatch exited (${code}) — double-space hotkey off`));
+  keywatch.on('exit', code => console.warn(`keywatch exited (${code}) — chord hotkeys off`));
 }
 
 // The desktop app SIGTERMs this server on quit — take the children with us

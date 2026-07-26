@@ -1,8 +1,9 @@
-// keywatch — listen-only global key tap that prints "voice-chord" when
-// Cmd+Shift is pressed together and released without any other key.
-// Pressing another key while holding (e.g. Cmd+Shift+4) cancels — real
-// shortcuts never trigger it. Never consumes or blocks events.
-// Requires Input Monitoring permission.
+// keywatch — listen-only global key tap:
+//  - prints "voice-chord" when Cmd+Shift is pressed together and released
+//    without any other key (any real key while holding cancels)
+//  - prints "quick-chord" on Fn+Space (the quick-ask panel hotkey — the Fn
+//    modifier is invisible to Electron's globalShortcut)
+// Never consumes or blocks events. Requires Input Monitoring permission.
 
 import CoreGraphics
 import Foundation
@@ -27,6 +28,11 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
         }
     case .keyDown:
         chordArmed = false // any real key while holding = a normal shortcut
+        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        if keyCode == 49 && flags.contains(.maskSecondaryFn) { // Fn+Space
+            print("quick-chord")
+            fflush(stdout)
+        }
     default:
         break
     }

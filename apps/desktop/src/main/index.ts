@@ -108,6 +108,7 @@ app.whenReady().then(() => {
   globalShortcut.register('Alt+Space', toggleQuickPanel);
 
   ipcMain.on('quick:hide', () => quickWin?.hide());
+  ipcMain.on('quick:toggle', toggleQuickPanel); // Fn+Space arrives via keywatch → server WS → renderer
   ipcMain.on('quick:open-in-app', (_e, text: string) => {
     quickWin?.hide();
     win.show();

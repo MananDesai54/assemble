@@ -20,6 +20,7 @@ declare global {
       onVoiceToggle: (cb: () => void) => void;
       quickOpenInApp: (text: string) => void;
       quickHide: () => void;
+      quickToggle: () => void;
       onOpenTalk: (cb: (text: string) => void) => void;
     };
   }
@@ -1657,6 +1658,7 @@ function openWs() {
     if (payload.kind === 'slack-message') slackLine(payload.message);
     if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
     if (payload.kind === 'voice-hotkey') voiceToggle();
+    if (payload.kind === 'quick-hotkey') window.assemble.quickToggle();
     if (payload.kind === 'setup-progress') setupProgressLine(payload);
     if (payload.kind === 'recording') void onRecordingEvent(payload);
     if (payload.kind === 'agent') {
