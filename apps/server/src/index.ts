@@ -19,7 +19,7 @@ import { existsSync, rmSync, statSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LiveTranscriber } from './live-stt';
-import { KOKORO_VOICES, kokoroLoaded, synthWav } from './tts';
+import { KOKORO_VOICES, kokoroLoaded, kokoroLastUse, synthWav, unloadKokoro } from './tts';
 import { LlmRuntime } from './llm-runtime';
 import {
   toolStatus, runSetupStep, SETUP_STEPS, AUDIOTAP_BIN, KEYWATCH_BIN,
@@ -66,25 +66,53 @@ const ctx: IntegrationContext = {
   notify: notifyMac,
 };
 
-// llama-server reachability, refreshed lazily
+// llama-server runs on demand: chat paths call llmReady() which wakes it
+// when needed; the idle reaper below stops it again (it holds gigabytes of
+// RAM and burns battery sitting idle).
 let llmOk = false;
 let llmCheckedAt = 0;
+let lastLlmUse = 0;
+let llmWake: Promise<boolean> | null = null;
+
+// passive: is a brain available (byok keyed, or local engine enabled +
+// installed)? Never wakes anything — status endpoints use this.
+function llmUsable(): boolean {
+  const b = byokConfig();
+  if (b.source === 'byok') return Boolean(b.key);
+  return kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server') !== null;
+}
+
 async function llmReady(): Promise<boolean> {
   const b = byokConfig();
   if (b.source === 'byok') return Boolean(b.key); // no health endpoint guarantee — errors surface per call
-  if (Date.now() - llmCheckedAt > 15_000) {
-    llmOk = await llm.healthy();
-    llmCheckedAt = Date.now();
-  }
-  return llmOk;
+  lastLlmUse = Date.now();
+  if (Date.now() - llmCheckedAt <= 15_000 && llmOk) return true;
+  llmOk = await llm.healthy();
+  llmCheckedAt = Date.now();
+  if (llmOk) return true;
+  if (!llmUsable()) return false;
+  llmWake ??= (async () => {
+    try {
+      llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf);
+      // model is already cached — this waits on load, not download
+      const deadline = Date.now() + 120_000;
+      while (Date.now() < deadline) {
+        if (await llm.healthy()) { llmOk = true; llmCheckedAt = Date.now(); return true; }
+        if (!llmRuntime.running) return false;
+        await Bun.sleep(1500);
+      }
+      return false;
+    } finally { llmWake = null; }
+  })();
+  return llmWake;
 }
 
 const app = new Hono();
 app.use('*', cors()); // desktop renderer runs on file:// — allow localhost calls
 
-app.get('/health', async c => c.json({
+app.get('/health', c => c.json({
   ok: true,
-  llm: await llmReady(),
+  llm: llmUsable(), // available ≠ awake — the engine wakes on first use
   recording: recorder.active !== null,
 }));
 
@@ -93,7 +121,7 @@ app.get('/health', async c => c.json({
 app.get('/setup/status', async c => {
   return c.json({
     ...toolStatus(activeWhisperPath()),
-    llmRunning: await llmReady(),
+    llmRunning: llmUsable(),
     claudeCli: Bun.which('claude') !== null,
     steps: SETUP_STEPS,
   });
@@ -159,6 +187,7 @@ app.post('/setup/run', async c => {
       // wait for health (model may be downloading — poll up to 30 min)
       const deadline = Date.now() + 30 * 60_000;
       while (Date.now() < deadline) {
+        lastLlmUse = Date.now(); // downloading — keep the idle reaper away
         if (await llm.healthy()) break;
         if (!llmRuntime.running) throw new Error('llm exited during startup');
         await Bun.sleep(3000);
@@ -555,10 +584,29 @@ console.log(`assemble server on :${server.port} (db → ${DB_PATH})`);
 
 void startConfigured(ctx);
 
-// resume the local LLM if the user enabled it before
-if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
-  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf);
-}
+// engines run on demand — llama-server wakes on the first chat (llmReady),
+// Kokoro loads on the first synth. The reaper stops whatever sat idle:
+// both hold hundreds of MB to GB of RAM and burn battery doing nothing.
+// kv engine_idle_min tunes the window (default 10, 0 = keep running).
+const engineIdleMs = () => {
+  const min = Number(kvGet(db, 'engine_idle_min') ?? 10);
+  return Number.isFinite(min) && min > 0 ? min * 60_000 : 0;
+};
+setInterval(() => {
+  const ms = engineIdleMs();
+  if (!ms) return;
+  const now = Date.now();
+  if (llmRuntime.running && lastLlmUse && now - lastLlmUse > ms) {
+    console.log('llm idle — stopping llama-server');
+    llmRuntime.stop();
+    llmOk = false;
+    llmCheckedAt = 0;
+  }
+  if (kokoroLoaded() && kokoroLastUse() && now - kokoroLastUse() > ms) {
+    console.log('kokoro idle — unloading');
+    void unloadKokoro();
+  }
+}, 60_000);
 
 // global hotkeys via listen-only event tap (needs Input Monitoring):
 // Cmd+Shift chord → voice command, Fn+Space → quick-ask panel
