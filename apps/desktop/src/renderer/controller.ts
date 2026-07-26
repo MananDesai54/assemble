@@ -67,7 +67,8 @@ export async function init() {
   window.assemble.onArmedChanged(v => {
     app.config.armed = v;
     if (!v) stopSensors();
-    else if (!app.engine && app.mode === 'app') void startSensors();
+    // flipping Listening on is the one consent gate — dialog, then sensors
+    else if (!app.engine && app.mode === 'app') { app.consentOpen = true; }
     emit();
   });
   window.assemble.onVoiceToggle(() => voiceToggle());
@@ -114,7 +115,8 @@ export function setTheme(theme: string) {
 export function setMode(mode: Mode) {
   app.mode = mode;
   bg?.setBoost(mode !== 'app');
-  if (mode === 'app' && !app.engine && !app.micError) app.consentOpen = true;
+  // armed persisted = standing consent — resume sensors silently, no dialog
+  if (mode === 'app' && app.config.armed && !app.engine && !app.micError) void startSensors();
   emit();
   void syncCamera();
 }

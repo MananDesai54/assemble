@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import {
   LayoutGrid, AudioLines, Disc, Workflow, Activity, Settings as SettingsIcon,
 } from 'lucide-react';
-import { app, useApp, emit } from './store';
+import { app, useApp } from './store';
 import { init, toggleTheme, setPage } from './controller';
 import { Landing } from './pages/Landing';
 import { Setup } from './pages/Setup';
@@ -35,11 +35,7 @@ const NAV = [
 function statusInfo(): { state: string; text: string } {
   if (app.micError) return { state: 'error', text: 'microphone unavailable' };
   if (!app.engine) {
-    return {
-      state: 'off',
-      text: !app.config?.armed ? 'off — flip Listening to start'
-        : app.mode === 'app' ? 'sensors off — click to start' : 'sensors off',
-    };
+    return { state: 'off', text: !app.config?.armed ? 'off' : 'sensors off' };
   }
   return app.config.armed ? { state: 'live', text: 'listening' } : { state: 'paused', text: 'paused' };
 }
@@ -54,32 +50,27 @@ function ThemeButton() {
   );
 }
 
-// status + listening toggle live together in one control
+// one control: the Listening switch, status as plain text beside it
 function ListeningControl() {
   useApp();
   const s = statusInfo();
   return (
-    <div className={cn(
-      'flex items-center gap-2.5 rounded-full border border-line bg-panel/60 py-1.5 pl-3 pr-2',
-      'group-data-[collapsible=icon]/sidebar:flex-col group-data-[collapsible=icon]/sidebar:rounded-xl group-data-[collapsible=icon]/sidebar:p-2',
-    )}>
-      <button
-        className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-xs text-dim group-data-[collapsible=icon]/sidebar:flex-none"
-        title={s.text}
-        onClick={() => { if (!app.engine && app.mode === 'app' && app.config.armed) { app.consentOpen = true; emit(); } }}
-      >
-        <span className={cn(
-          'size-2 shrink-0 rounded-full bg-dim',
-          s.state === 'live' && 'animate-[breathe_2.4s_ease-in-out_infinite] bg-ok shadow-[0_0_8px_var(--ok)]',
-          s.state === 'paused' && 'bg-acc',
-          s.state === 'error' && 'bg-danger',
-        )} />
-        <span className="truncate group-data-[collapsible=icon]/sidebar:hidden">{s.text}</span>
-      </button>
-      {app.mode === 'app' && (
-        <Switch checked={!!app.config?.armed} onCheckedChange={v => void window.assemble.setArmed(v)} />
+    <label
+      title={s.text}
+      className={cn(
+        'flex cursor-pointer items-center gap-2.5 rounded-full border border-line bg-panel/60 py-1.5 pl-3 pr-2',
+        'group-data-[collapsible=icon]/sidebar:justify-center group-data-[collapsible=icon]/sidebar:rounded-xl group-data-[collapsible=icon]/sidebar:p-2',
       )}
-    </div>
+    >
+      <span className={cn(
+        'min-w-0 flex-1 truncate text-xs text-dim group-data-[collapsible=icon]/sidebar:hidden',
+        s.state === 'live' && 'text-ok',
+        s.state === 'error' && 'text-danger',
+      )}>
+        {s.text}
+      </span>
+      <Switch checked={!!app.config?.armed} onCheckedChange={v => void window.assemble.setArmed(v)} />
+    </label>
   );
 }
 

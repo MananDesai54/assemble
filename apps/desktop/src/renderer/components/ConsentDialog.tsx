@@ -33,7 +33,11 @@ export function ConsentDialog() {
               <Button onClick={async () => { close(); await startSensors(); }}>
                 Start{wantsCamera ? ' mic + camera' : ' microphone'}
               </Button>
-              <Button variant="link" onClick={() => { close(); toast('Sensors off — click the status dot to start.'); }}>
+              <Button variant="link" onClick={async () => {
+                close();
+                await window.assemble.setArmed(false); // revert the switch — consent declined
+                toast('Listening stays off.');
+              }}>
                 Not now
               </Button>
             </div>

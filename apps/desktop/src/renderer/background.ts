@@ -157,7 +157,7 @@ export function startBackground(container: HTMLElement): Bg {
       iResolution: { value: new Color(1, 1, 1) },
       uColor: { value: new Color(1, 1, 1) },
       uAmplitude: { value: 1 },
-      uDistance: { value: 0.9 }, // spread lines across the full height
+      uDistance: { value: 0.35 }, // loose bundle around the vertical center
       uOpacity: { value: 0.35 },
       uMouse: { value: new Float32Array([0.5, 0.5]) },
     },
