@@ -16,6 +16,10 @@ import { SettingsPage } from './pages/Settings';
 import { Toast } from './components/Toast';
 import { ConsentDialog } from './components/ConsentDialog';
 import { Switch } from './components/ui/switch';
+import {
+  Sidebar, SidebarProvider, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
+  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarSeparator, SidebarTrigger, SidebarInset,
+} from './components/ui/sidebar';
 import { cn } from './lib/utils';
 
 const NAV = [
@@ -83,37 +87,43 @@ function Shell() {
   useApp();
   const Page = PAGES[app.page] ?? DeskPage;
   return (
-    <div className="flex min-h-0 flex-1">
-      <nav className="glass flex w-[168px] shrink-0 flex-col gap-1 border-r border-line px-2.5 py-3.5 max-[640px]:w-14">
-        {NAV.map(({ page, label, Icon }) => (
-          <button
-            key={page}
-            onClick={() => setPage(page)}
-            className={cn(
-              'flex cursor-pointer items-center gap-2.5 rounded-[10px] border-none px-3 py-2 text-left text-[13.5px] transition-colors',
-              app.page === page
-                ? 'bg-acc-soft font-semibold text-acc shadow-[inset_2px_0_0_var(--acc)]'
-                : 'text-dim hover:bg-ink/5 hover:text-ink',
-            )}
+    <SidebarProvider>
+      <Sidebar>
+        <SidebarContent>
+          <SidebarGroup>
+            <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+            <SidebarMenu>
+              {NAV.map(({ page, label, Icon }) => (
+                <SidebarMenuItem key={page}>
+                  <SidebarMenuButton isActive={app.page === page} tooltip={label} onClick={() => setPage(page)}>
+                    <Icon />
+                    <span>{label}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroup>
+        </SidebarContent>
+        <SidebarFooter>
+          <SidebarSeparator className="mx-0" />
+          <SidebarTrigger className="self-start" />
+        </SidebarFooter>
+      </Sidebar>
+      <SidebarInset>
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={app.page}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+            className="flex flex-1 flex-col gap-4.5 overflow-y-auto px-7 py-6"
           >
-            <Icon className="size-[15px]" />
-            <span className="max-[640px]:hidden">{label}</span>
-          </button>
-        ))}
-      </nav>
-      <AnimatePresence mode="wait">
-        <motion.main
-          key={app.page}
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-          className="flex flex-1 flex-col gap-4.5 overflow-y-auto px-7 py-6"
-        >
-          <Page />
-        </motion.main>
-      </AnimatePresence>
-    </div>
+            <Page />
+          </motion.div>
+        </AnimatePresence>
+      </SidebarInset>
+    </SidebarProvider>
   );
 }
 

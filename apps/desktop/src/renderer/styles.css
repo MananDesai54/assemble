@@ -4,38 +4,38 @@
 @import "tailwindcss";
 
 :root {
-  --acc: #4f5df0;
-  --acc-2: #00a8c6;
-  --acc-soft: rgba(79, 93, 240, 0.12);
-  --grad: linear-gradient(135deg, #4f5df0, #00a8c6);
-  --ok: #0f9b6c;
-  --danger: #de4560;
+  --acc: #7c3aed;
+  --acc-2: #a855f7;
+  --acc-soft: rgba(124, 58, 237, 0.10);
+  --grad: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  --ok: #059669;
+  --danger: #e11d48;
 
-  --bg: #eef0f9;
+  --bg: #f5f4fa;
   --panel: #ffffff;
-  --panel-2: #e2e6f5;
-  --ink: #1a1f3d;
-  --dim: #5f6890;
-  --line: #d6dbef;
-  --shadow: rgba(26, 31, 61, 0.10);
-  --glow: rgba(79, 93, 240, 0.20);
+  --panel-2: #e9e6f5;
+  --ink: #1c1730;
+  --dim: #6b6489;
+  --line: #ddd8ec;
+  --shadow: rgba(28, 23, 48, 0.10);
+  --glow: rgba(124, 58, 237, 0.20);
 }
 :root[data-theme='dark'] {
-  --acc: #8b9aff;
-  --acc-2: #4fd8e8;
-  --acc-soft: rgba(139, 154, 255, 0.14);
-  --grad: linear-gradient(135deg, #7c8cff, #37c8dd);
-  --ok: #45d69a;
-  --danger: #ff6b81;
+  --acc: #a78bfa;
+  --acc-2: #c084fc;
+  --acc-soft: rgba(167, 139, 250, 0.13);
+  --grad: linear-gradient(135deg, #a78bfa, #7c3aed);
+  --ok: #34d399;
+  --danger: #fb7185;
 
-  --bg: #090c17;
-  --panel: #10152a;
-  --panel-2: #1a2140;
-  --ink: #e7eaff;
-  --dim: #8891b8;
-  --line: #232c52;
+  --bg: #0d0b14;
+  --panel: #14111f;
+  --panel-2: #1e1930;
+  --ink: #ece9f8;
+  --dim: #8f89ab;
+  --line: #2a2342;
   --shadow: rgba(0, 0, 0, 0.5);
-  --glow: rgba(124, 140, 255, 0.25);
+  --glow: rgba(139, 92, 246, 0.30);
 }
 
 @theme inline {

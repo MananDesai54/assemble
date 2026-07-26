@@ -112,14 +112,9 @@ export function setTheme(theme: string) {
 
 /* ================= mode / page router ================= */
 
-const PAGE_SCENES: Record<string, 'aurora' | 'sonar' | 'ridge' | 'flow' | 'drift'> = {
-  desk: 'sonar', talk: 'aurora', calls: 'ridge', work: 'flow', activity: 'drift', settings: 'drift',
-};
-
 export function setMode(mode: Mode) {
   app.mode = mode;
   bg?.setBoost(mode !== 'app');
-  bg?.setScene(mode !== 'app' ? 'aurora' : (PAGE_SCENES[app.page] ?? 'drift'));
   if (mode === 'app' && !app.engine && !app.micError) app.consentOpen = true;
   emit();
   void syncCamera();
@@ -128,7 +123,6 @@ export function setMode(mode: Mode) {
 export function setPage(page: string) {
   if (app.page === 'talk' && page !== 'talk') talkLeave(); // stop tts + session when navigating away
   app.page = page;
-  bg?.setScene(PAGE_SCENES[page] ?? 'drift');
   emit();
 }
 
