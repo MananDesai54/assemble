@@ -75,3 +75,23 @@ describe('bot/webhook messages', () => {
     expect(h?.botId).toBe('B1');
   });
 });
+
+describe('attachment/block messages (Grafana-style alerts)', () => {
+  it('extracts text from attachments when top-level text is empty', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    const m = normalizeEvent({
+      type: 'message', subtype: 'bot_message', ts: '9.0', channel: 'C9', text: '',
+      bot_id: 'B2', username: 'Centerseat Prod App',
+      attachments: [{ title: 'Centerseat Alert [prod]', text: 'Mimir ingester memory exceeded 85%.' }],
+    });
+    expect(m?.text).toBe('Centerseat Alert [prod] — Mimir ingester memory exceeded 85%.');
+    expect(m?.botName).toBe('Centerseat Prod App');
+  });
+
+  it('falls back to blocks, still drops truly empty messages', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    const b = normalizeEvent({ type: 'message', ts: '10.0', channel: 'C9', text: '', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: 'deploy done' } }] });
+    expect(b?.text).toBe('deploy done');
+    expect(normalizeEvent({ type: 'message', ts: '11.0', channel: 'C9', text: '' })).toBeNull();
+  });
+});

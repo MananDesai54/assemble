@@ -17,7 +17,27 @@ export interface NormalizedMessage {
 
 // No subtype filtering — the user wants every message they receive. Anything
 // with text is kept (bots, webhooks, joins, broadcasts). Edits/deletions have
-// no top-level text, so they never create rows.
+// no content of their own, so they never create rows.
+
+/**
+ * Alert-style bot posts (Grafana, CI, …) carry their content in attachments
+ * or blocks with an empty top-level text — pull it out of wherever it lives.
+ */
+export function extractText(msg: any): string {
+  if (typeof msg?.text === 'string' && msg.text.trim()) return String(msg.text);
+  const parts: string[] = [];
+  for (const a of msg?.attachments ?? []) {
+    const line = [a?.title, a?.text ?? a?.fallback].filter(Boolean).join(' — ');
+    if (line) parts.push(line);
+  }
+  if (!parts.length) {
+    for (const b of msg?.blocks ?? []) {
+      const t = b?.text?.text;
+      if (t) parts.push(String(t));
+    }
+  }
+  return parts.join('\n');
+}
 
 export interface EnrichedMessage extends NormalizedMessage {
   userName: string | null;
@@ -35,13 +55,14 @@ export function normalizeHistoryMessage(
   team?: string | null,
 ): NormalizedMessage | null {
   if (!msg || msg.type !== 'message') return null;
-  if (!msg.text || !msg.ts) return null;
+  const text = extractText(msg);
+  if (!text || !msg.ts) return null;
   return {
     slackTs: String(msg.ts),
     channel,
     channelType,
     user: msg.user ?? null,
-    text: String(msg.text),
+    text,
     threadTs: msg.thread_ts ?? null,
     team: team ?? null,
     botName: msg.username ?? null,
@@ -58,13 +79,14 @@ export interface SlackIntake {
 // Pure: one Events-API message event → normalized message, or null for noise.
 export function normalizeEvent(event: any, team?: string | null): NormalizedMessage | null {
   if (!event || event.type !== 'message') return null;
-  if (!event.text || !event.ts || !event.channel) return null;
+  const text = extractText(event);
+  if (!text || !event.ts || !event.channel) return null;
   return {
     slackTs: String(event.ts),
     channel: String(event.channel),
     channelType: event.channel_type ?? null,
     user: event.user ?? null,
-    text: String(event.text),
+    text,
     threadTs: event.thread_ts ?? null,
     team: team ?? null,
     botName: event.username ?? null,
