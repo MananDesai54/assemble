@@ -112,4 +112,17 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {}); // tray app: stay alive
-app.on('before-quit', () => { serverProc?.kill('SIGTERM'); });
+
+// Clean shutdown: signal the server (which stops llama-server, keywatch,
+// audiotap, integrations) and give it a moment to finish before quitting.
+let cleanedUp = false;
+app.on('before-quit', e => {
+  quitting = true;
+  if (cleanedUp || !serverProc) return;
+  e.preventDefault();
+  const proc = serverProc;
+  const done = () => { cleanedUp = true; app.quit(); };
+  const force = setTimeout(() => { proc.kill('SIGKILL'); done(); }, 3000);
+  proc.once('exit', () => { clearTimeout(force); done(); });
+  proc.kill('SIGTERM');
+});
