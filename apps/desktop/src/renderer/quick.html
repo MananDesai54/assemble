@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:4817; style-src 'unsafe-inline'" />
 <style>
-  :root { --bg: #17140f; --ink: #efe9dd; --dim: #9b9384; --line: #3a3428; --amber: #d9a441; }
+  :root { --bg: #10152a; --ink: #e7eaff; --dim: #8891b8; --line: #232c52; --grad: linear-gradient(135deg, #7c8cff, #37c8dd); }
   @media (prefers-color-scheme: light) {
-    :root { --bg: #f7f4ee; --ink: #2a251d; --dim: #7d766a; --line: #ddd6c8; --amber: #b8862f; }
+    :root { --bg: #ffffff; --ink: #1a1f3d; --dim: #5f6890; --line: #d6dbef; --grad: linear-gradient(135deg, #4f5df0, #00a8c6); }
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { background: transparent; }
@@ -17,7 +17,7 @@
     flex-direction: column; gap: 10px;
   }
   .row { display: flex; gap: 8px; align-items: center; }
-  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); flex-shrink: 0; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--grad); flex-shrink: 0; }
   .dot.busy { animation: pulse 1s ease-in-out infinite; }
   @keyframes pulse { 50% { transform: scale(1.6); opacity: 0.5; } }
   input {

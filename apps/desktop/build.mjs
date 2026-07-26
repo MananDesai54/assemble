@@ -1,5 +1,7 @@
 import { build } from 'esbuild';
-import { cpSync, mkdirSync } from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import postcss from 'postcss';
+import tailwindcss from '@tailwindcss/postcss';
 
 mkdirSync('dist', { recursive: true });
 
@@ -22,10 +24,11 @@ await build({
 });
 
 await build({
-  entryPoints: ['src/renderer/renderer.ts'],
+  entryPoints: ['src/renderer/main.tsx'],
   bundle: true,
   platform: 'browser',
   format: 'esm',
+  jsx: 'automatic',
   outfile: 'dist/renderer.js',
 });
 
@@ -37,7 +40,12 @@ await build({
   outfile: 'dist/quick.js',
 });
 
+// Tailwind v4: scans src/renderer for class names, emits one flat stylesheet.
+const cssIn = 'src/renderer/styles.css';
+const result = await postcss([tailwindcss({ base: 'src/renderer' })])
+  .process(readFileSync(cssIn, 'utf8'), { from: cssIn });
+writeFileSync('dist/styles.css', result.css);
+
 cpSync('src/renderer/index.html', 'dist/index.html');
 cpSync('src/renderer/quick.html', 'dist/quick.html');
-cpSync('src/renderer/styles.css', 'dist/styles.css');
 console.log('desktop build done');

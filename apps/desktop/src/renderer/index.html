@@ -7,23 +7,8 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <canvas id="bg"></canvas>
-  <header id="topbar" hidden>
-    <span class="wordmark">assemble</span>
-    <span id="status" class="status" data-state="off"><span class="dot"></span><span id="status-text">starting…</span></span>
-    <span id="rec-dot" class="rec-dot" hidden>● REC</span>
-    <span id="voice-dot" class="voice-dot" hidden>🎙 listening</span>
-    <div class="topbar-right">
-      <button id="theme-toggle" class="ghost" title="Switch theme">◐</button>
-      <label class="switch" id="armed-wrap" hidden>
-        <input type="checkbox" id="armed" />
-        <span>Listening</span>
-      </label>
-    </div>
-  </header>
-
-  <main id="screen"></main>
-
+  <canvas id="bg" style="position:fixed; inset:0; z-index:0; pointer-events:none;"></canvas>
+  <div id="root"></div>
   <script type="module" src="./renderer.js"></script>
 </body>
 </html>
