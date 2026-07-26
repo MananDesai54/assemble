@@ -21,6 +21,9 @@ export class LlmRuntime {
     this.currentModel = hfModel;
     const p = spawn('llama-server', [
       '-hf', hfModel, '--port', String(this.port), '-ngl', '99', '-c', '8192', '--jinja',
+      // reasoning models burn the whole token budget "thinking" and return an
+      // empty content field — replies here are spoken aloud, keep them direct
+      '--reasoning-budget', '0',
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
     const feed = (buf: Buffer) => {
       for (const line of buf.toString().split('\n')) {

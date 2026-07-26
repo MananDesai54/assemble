@@ -52,8 +52,17 @@ export class Llm {
       const detail = await res.text().then(t => t.slice(0, 200)).catch(() => '');
       throw new Error(`llm http ${res.status}${detail ? ` — ${detail}` : ''}`);
     }
-    const data = await res.json() as { choices?: { message?: { content?: string } }[] };
-    return data.choices?.[0]?.message?.content ?? '';
+    const data = await res.json() as { choices?: { message?: { content?: string }; finish_reason?: string }[] };
+    const out = data.choices?.[0]?.message?.content ?? '';
+    if (!out.trim()) {
+      // reasoning models can spend the whole budget thinking and return an
+      // empty content field — surface it instead of saving an empty reply
+      const why = data.choices?.[0]?.finish_reason === 'length'
+        ? 'model ran out of tokens before answering — try again or shorten the question'
+        : 'model returned an empty reply';
+      throw new Error(why);
+    }
+    return out;
   }
 
   async healthy(): Promise<boolean> {
