@@ -25,6 +25,7 @@ mac:
     - zip
     - dmg
 linux:
+  executableName: assemble
   category: Utility
   target:
     - AppImage
