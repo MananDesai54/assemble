@@ -6,6 +6,7 @@ import { refreshSetupStatus } from '../controller';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
+import { Switch } from './ui/switch';
 
 interface ModelOption {
   id: string; label: string; size: string; notes: string;
@@ -14,6 +15,7 @@ interface ModelOption {
 interface ModelsData {
   whisper: { options: ModelOption[]; selected: string };
   llm: { options: ModelOption[]; selected: string };
+  reasoning: boolean;
   byok: { source: 'local' | 'byok'; url: string; model: string; hasKey: boolean };
 }
 
@@ -69,6 +71,15 @@ export function ModelSelectors() {
     toast(`${kind === 'llm' ? 'Brain model' : 'Speech model'} → ${label}. Run "Install everything" if it needs a download.`);
   };
 
+  const setReasoning = async (on: boolean) => {
+    setData({ ...data, reasoning: on });
+    await fetch(`${SERVER}/setup/models`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reasoning: on }),
+    });
+    toast(on ? 'Reasoning on — deeper answers, slower.' : 'Reasoning off — direct answers.');
+  };
+
   const setSource = async (source: 'local' | 'byok') => {
     setData({ ...data, byok: { ...data.byok, source } });
     await fetch(`${SERVER}/setup/byok`, {
@@ -113,13 +124,22 @@ export function ModelSelectors() {
           <span><b className="text-ink">Your API key</b> — any OpenAI-compatible provider (OpenAI, OpenRouter, Groq, Gemini…)</span>
         </label>
         {data.byok.source === 'local' && (
-          <ModelBlock
-            title="Brain model"
-            hint="Powers Slack triage, digests, drafts, call summaries, voice intents."
-            options={data.llm.options}
-            selected={data.llm.selected}
-            onSelect={id => void pickModel('llm', id)}
-          />
+          <>
+            <ModelBlock
+              title="Brain model"
+              hint="Powers Slack triage, digests, drafts, call summaries, voice intents."
+              options={data.llm.options}
+              selected={data.llm.selected}
+              onSelect={id => void pickModel('llm', id)}
+            />
+            <label className="flex cursor-pointer items-center justify-between gap-2 rounded-xl border border-line p-3">
+              <span className="flex flex-col gap-0.5 text-sm">
+                <b>Reasoning</b>
+                <span className="text-[12.5px] text-dim">Model thinks before answering — deeper, but slower and chattier on battery.</span>
+              </span>
+              <Switch checked={data.reasoning} onCheckedChange={v => void setReasoning(v)} />
+            </label>
+          </>
         )}
         {data.byok.source === 'byok' && (
           <div className="mt-1 flex max-w-[480px] flex-col gap-2">

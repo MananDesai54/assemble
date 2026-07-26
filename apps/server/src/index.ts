@@ -56,6 +56,7 @@ const recorder = new Recorder({ binPath: AUDIOTAP_BIN, dir: RECORDINGS_DIR });
 const agents = new AgentRunner();
 const selectedWhisper = () => kvGet(db, 'whisper_model') || DEFAULT_WHISPER;
 const selectedLlm = () => kvGet(db, 'llm_model') || DEFAULT_LLM;
+const reasoningOn = () => kvGet(db, 'llm_reasoning') !== '0'; // default: model's natural behavior
 const activeWhisperPath = () => whisperPath(selectedWhisper());
 
 const ctx: IntegrationContext = {
@@ -104,6 +105,7 @@ app.get('/setup/models', c => {
   return c.json({
     whisper: { options: WHISPER_MODELS, selected: selectedWhisper() },
     llm: { options: LLM_MODELS, selected: selectedLlm() },
+    reasoning: reasoningOn(),
     byok: { source: b.source, url: b.url, model: b.model, hasKey: Boolean(b.key) },
   });
 });
@@ -134,16 +136,16 @@ app.post('/setup/byok', async c => {
 });
 
 app.post('/setup/models', async c => {
-  const { whisper, llm: llmId } = await c.req.json<{ whisper?: string; llm?: string }>();
+  const { whisper, llm: llmId, reasoning } = await c.req.json<{ whisper?: string; llm?: string; reasoning?: boolean }>();
   if (whisper && WHISPER_MODELS.some(m => m.id === whisper)) kvSet(db, 'whisper_model', whisper);
-  if (llmId && LLM_MODELS.some(m => m.id === llmId)) {
-    kvSet(db, 'llm_model', llmId);
-    if (llmRuntime.running) {
-      llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(llmId).hf);
-      llmCheckedAt = 0;
-    }
+  if (typeof reasoning === 'boolean') kvSet(db, 'llm_reasoning', reasoning ? '1' : '0');
+  if (llmId && LLM_MODELS.some(m => m.id === llmId)) kvSet(db, 'llm_model', llmId);
+  // model or reasoning changed while the engine is up → relaunch with new args
+  if ((llmId || typeof reasoning === 'boolean') && llmRuntime.running) {
+    llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf, reasoningOn());
+    llmCheckedAt = 0;
   }
-  return c.json({ whisper: selectedWhisper(), llm: selectedLlm() });
+  return c.json({ whisper: selectedWhisper(), llm: selectedLlm(), reasoning: reasoningOn() });
 });
 
 let setupRunning = false;
@@ -154,7 +156,7 @@ app.post('/setup/run', async c => {
   setupRunning = true;
   try {
     if (step === 'llm-start') {
-      llmRuntime.start(emit, llmModel(selectedLlm()).hf);
+      llmRuntime.start(emit, llmModel(selectedLlm()).hf, reasoningOn());
       kvSet(db, 'llm_enabled', '1');
       // wait for health (model may be downloading — poll up to 30 min)
       const deadline = Date.now() + 30 * 60_000;
@@ -557,7 +559,7 @@ void startConfigured(ctx);
 
 // resume the local LLM if the user enabled it before
 if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
-  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf);
+  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf, reasoningOn());
 }
 
 // global hotkeys via listen-only event tap (needs Input Monitoring):
