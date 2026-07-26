@@ -48,4 +48,8 @@ writeFileSync('dist/styles.css', result.css);
 
 cpSync('src/renderer/index.html', 'dist/index.html');
 cpSync('src/renderer/quick.html', 'dist/quick.html');
+
+// dev-only: make the stock Electron binary show up as "assemble" on macOS
+await import('./scripts/brand-electron.mjs');
+
 console.log('desktop build done');
