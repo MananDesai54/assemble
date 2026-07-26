@@ -50,8 +50,7 @@ function Topbar() {
   const dark = document.documentElement.dataset.theme === 'dark';
   return (
     <header className="glass relative z-10 flex items-center gap-3 border-b border-line px-5 py-2.5">
-      <LogoMark className="size-6 rounded-md" />
-      <span className="text-sm font-bold lowercase tracking-[0.30em] text-ink">assemble</span>
+      <LogoMark className="size-9 rounded-[10px]" />
       {app.recording && <span className="animate-[breathe_1.2s_ease-in-out_infinite] text-xs font-bold tracking-[0.08em] text-danger">● REC</span>}
       <div className="ml-auto flex items-center gap-3">
         <button className="cursor-pointer rounded-lg border border-transparent px-2 py-1 text-[15px] text-dim hover:border-line hover:text-ink"

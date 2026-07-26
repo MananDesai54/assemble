@@ -78,6 +78,12 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // Dev runs use the stock Electron binary — swap the Dock/app-switcher icon
+  // at runtime. Packaged builds get the icon from the bundle instead.
+  if (process.platform === 'darwin') {
+    const icon = join(__dirname, '..', 'assets', 'icon.png');
+    if (existsSync(icon)) app.dock?.setIcon(icon);
+  }
   store = new ConfigStore(join(app.getPath('userData'), 'config.json'));
   void ensureServer();
   createWindow();
