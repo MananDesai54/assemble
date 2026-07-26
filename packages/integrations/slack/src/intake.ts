@@ -13,9 +13,9 @@ export interface NormalizedMessage {
   botName?: string | null;
 }
 
-// Subtypes worth keeping: humans (none), cross-posted thread replies, and
-// bot/webhook posts — automations post via webhooks and must be visible.
-const KEPT_SUBTYPES = new Set(['thread_broadcast', 'bot_message']);
+// No subtype filtering — the user wants every message they receive. Anything
+// with text is kept (bots, webhooks, joins, broadcasts). Edits/deletions have
+// no top-level text, so they never create rows.
 
 export interface EnrichedMessage extends NormalizedMessage {
   userName: string | null;
@@ -33,7 +33,6 @@ export function normalizeHistoryMessage(
   team?: string | null,
 ): NormalizedMessage | null {
   if (!msg || msg.type !== 'message') return null;
-  if (msg.subtype && !KEPT_SUBTYPES.has(msg.subtype)) return null;
   if (!msg.text || !msg.ts) return null;
   return {
     slackTs: String(msg.ts),
@@ -43,7 +42,7 @@ export function normalizeHistoryMessage(
     text: String(msg.text),
     threadTs: msg.thread_ts ?? null,
     team: team ?? null,
-    botName: msg.subtype === 'bot_message' ? (msg.username ?? 'bot') : null,
+    botName: msg.username ?? (msg.subtype === 'bot_message' ? 'bot' : null),
   };
 }
 
@@ -56,7 +55,6 @@ export interface SlackIntake {
 // Pure: one Events-API message event → normalized message, or null for noise.
 export function normalizeEvent(event: any, team?: string | null): NormalizedMessage | null {
   if (!event || event.type !== 'message') return null;
-  if (event.subtype && !KEPT_SUBTYPES.has(event.subtype)) return null;
   if (!event.text || !event.ts || !event.channel) return null;
   return {
     slackTs: String(event.ts),
@@ -66,7 +64,7 @@ export function normalizeEvent(event: any, team?: string | null): NormalizedMess
     text: String(event.text),
     threadTs: event.thread_ts ?? null,
     team: team ?? null,
-    botName: event.subtype === 'bot_message' ? (event.username ?? 'bot') : null,
+    botName: event.username ?? (event.subtype === 'bot_message' ? 'bot' : null),
   };
 }
 

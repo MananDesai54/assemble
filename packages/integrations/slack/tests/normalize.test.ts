@@ -15,10 +15,11 @@ describe('normalizeHistoryMessage', () => {
       text: 'hello',
       threadTs: null,
       team: 'T1',
+      botName: null,
     });
   });
 
-  it('keeps thread broadcasts, drops other subtypes', () => {
+  it('keeps every subtype that carries text', () => {
     expect(normalizeHistoryMessage(
       { type: 'message', subtype: 'thread_broadcast', ts: '2.0', user: 'U1', text: 'fyi', thread_ts: '1.0' },
       'C1', 'channel',
@@ -26,7 +27,7 @@ describe('normalizeHistoryMessage', () => {
     expect(normalizeHistoryMessage(
       { type: 'message', subtype: 'channel_join', ts: '3.0', user: 'U1', text: 'joined' },
       'C1', 'channel',
-    )).toBeNull();
+    )?.text).toBe('joined');
   });
 
   it('drops non-messages and empty text', () => {
@@ -47,15 +48,17 @@ describe('normalizeEvent (push transport)', () => {
     const m = normalizeEvent({ type: 'message', ts: '5.0', channel: 'C9', channel_type: 'channel', user: 'U3', text: 'yo' }, 'T1');
     expect(m).toEqual({
       slackTs: '5.0', channel: 'C9', channelType: 'channel', user: 'U3',
-      text: 'yo', threadTs: null, team: 'T1',
+      text: 'yo', threadTs: null, team: 'T1', botName: null,
     });
   });
 
-  it('drops joins/edits, keeps thread broadcasts', async () => {
+  it('keeps all message subtypes with text, drops non-messages', async () => {
     const { normalizeEvent } = await import('../src/intake');
-    expect(normalizeEvent({ type: 'message', subtype: 'channel_join', ts: '1.0', channel: 'C9', text: 'joined' })).toBeNull();
+    expect(normalizeEvent({ type: 'message', subtype: 'channel_join', ts: '1.0', channel: 'C9', text: 'joined' })?.text).toBe('joined');
     expect(normalizeEvent({ type: 'message', subtype: 'thread_broadcast', ts: '2.0', channel: 'C9', user: 'U1', text: 'fyi', thread_ts: '1.0' })?.threadTs).toBe('1.0');
     expect(normalizeEvent({ type: 'reaction_added' })).toBeNull();
+    // edits nest text under .message — no top-level text, no row
+    expect(normalizeEvent({ type: 'message', subtype: 'message_changed', ts: '3.0', channel: 'C9', message: { text: 'edited' } })).toBeNull();
   });
 });
 
