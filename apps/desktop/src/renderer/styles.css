@@ -404,15 +404,11 @@ button { font: inherit; color: inherit; }
 }
 .talk-composer input:focus { outline: none; border-color: color-mix(in srgb, var(--amber) 55%, var(--line)); }
 .talk-status { text-align: center; padding: 6px 0 0; min-height: 22px; }
-.voice-list { display: flex; flex-direction: column; }
-.voice-row {
-  display: flex; align-items: center; gap: 10px; padding: 7px 8px;
-  border-radius: 8px; cursor: pointer;
+.voice-pick { display: flex; gap: 10px; align-items: center; }
+.voice-pick select {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 8px 10px; font: inherit; max-width: 320px;
 }
-.voice-row:hover { background: color-mix(in srgb, var(--ink) 4%, transparent); }
-.voice-row .voice-name { min-width: 220px; }
-.voice-row .voice-play { margin-left: auto; font-size: 12px; }
-.voice-row input[type='radio'] { accent-color: var(--amber); }
 
 /* ---------- settings tabs ---------- */
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }

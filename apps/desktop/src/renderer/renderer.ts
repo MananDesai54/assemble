@@ -909,65 +909,43 @@ function stopPreview() {
 
 async function previewVoice(value: string, btn?: HTMLButtonElement) {
   stopPreview();
+  const label = btn?.textContent ?? '';
   if (btn) { btn.disabled = true; btn.textContent = '\u2026'; }
-  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = '\u25b6'; } };
-  if (value.startsWith('k:')) {
-    try {
-      const r = await fetch(`${SERVER}/tts`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: VOICE_PREVIEW_TEXT, voice: value.slice(2) }),
-      });
-      if (!r.ok) { toast('Voice preview failed — model still downloading?'); restore(); return; }
-      const url = URL.createObjectURL(await r.blob());
-      previewAudio = new Audio(url);
-      previewAudio.onended = () => { URL.revokeObjectURL(url); restore(); };
-      void previewAudio.play();
-    } catch { toast('Local server unreachable.'); restore(); }
-  } else {
-    const u = new SpeechSynthesisUtterance(VOICE_PREVIEW_TEXT);
-    if (value.startsWith('s:')) {
-      const v = speechSynthesis.getVoices().find(x => x.name === value.slice(2));
-      if (v) u.voice = v;
-    }
-    u.onend = restore;
-    u.onerror = restore;
-    speechSynthesis.speak(u);
-  }
+  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = label || '\u25b6 Preview'; } };
+  try {
+    const r = await fetch(`${SERVER}/tts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: VOICE_PREVIEW_TEXT, voice: value.replace(/^k:/, '') }),
+    });
+    if (!r.ok) { toast('Voice preview failed — model still downloading?'); restore(); return; }
+    const url = URL.createObjectURL(await r.blob());
+    previewAudio = new Audio(url);
+    previewAudio.onended = () => { URL.revokeObjectURL(url); restore(); };
+    void previewAudio.play();
+  } catch { toast('Local server unreachable.'); restore(); }
 }
 
-// Settings → Local AI → assistant voice: every voice previewable, Heart default.
+// Settings → Local AI → assistant voice: Kokoro only, one dropdown + preview.
 async function renderVoiceSettings(container: HTMLElement) {
   let kokoro: { id: string; label: string }[] = [];
   try { kokoro = (await (await fetch(`${SERVER}/tts/voices`)).json()).voices; } catch { /* server offline */ }
-  const saved = localStorage.getItem('talk-voice') ?? 'k:af_heart';
+  if (!kokoro.length) { container.innerHTML = '<span class="hint">Voices unavailable — local server offline.</span>'; return; }
+  let saved = localStorage.getItem('talk-voice') ?? 'k:af_heart';
+  if (!saved.startsWith('k:')) saved = 'k:af_heart';
   container.innerHTML = `
-    <div class="model-head"><b>Assistant voice</b><span class="hint">Speaks Talk replies. Kokoro runs fully local (~90 MB once); Hindi replies use the system Hindi voice.</span></div>
-    <div class="voice-list" id="voice-list"></div>`;
-  const list = container.querySelector('#voice-list') as HTMLElement;
-  const rows: { value: string; label: string; note?: string }[] = [
-    ...kokoro.map(v => ({ value: `k:${v.id}`, label: v.label, note: 'Kokoro · local neural' })),
-    { value: '', label: 'System voice (auto)', note: 'OS voices, auto by language' },
-    ...speechSynthesis.getVoices().filter(v => /^(en|hi)/i.test(v.lang))
-      .map(v => ({ value: `s:${v.name}`, label: `${v.name} (${v.lang})`, note: 'System' })),
-  ];
-  for (const r of rows) {
-    const row = document.createElement('label');
-    row.className = 'voice-row';
-    row.innerHTML = `
-      <input type="radio" name="talk-voice" value="${r.value}" ${r.value === saved ? 'checked' : ''}/>
-      <span class="voice-name">${r.label}</span>
-      <span class="hint">${r.note ?? ''}</span>
-      <button class="ghost voice-play" title="Preview">\u25b6</button>`;
-    (row.querySelector('input') as HTMLInputElement).onchange = () => {
-      localStorage.setItem('talk-voice', r.value);
-      void previewVoice(r.value, row.querySelector('.voice-play') as HTMLButtonElement);
-    };
-    (row.querySelector('.voice-play') as HTMLButtonElement).onclick = e => {
-      e.preventDefault();
-      void previewVoice(r.value, e.currentTarget as HTMLButtonElement);
-    };
-    list.appendChild(row);
-  }
+    <div class="model-head"><b>Assistant voice</b><span class="hint">Speaks Talk replies — Kokoro, fully local. Hindi replies use the OS Hindi voice automatically.</span></div>
+    <div class="voice-pick">
+      <select id="voice-dd">${kokoro.map(v =>
+        `<option value="k:${v.id}" ${`k:${v.id}` === saved ? 'selected' : ''}>${v.label}</option>`).join('')}</select>
+      <button class="secondary" id="voice-preview">\u25b6 Preview</button>
+    </div>`;
+  const dd = container.querySelector('#voice-dd') as HTMLSelectElement;
+  const btn = container.querySelector('#voice-preview') as HTMLButtonElement;
+  dd.onchange = () => {
+    localStorage.setItem('talk-voice', dd.value);
+    void previewVoice(dd.value, btn);
+  };
+  btn.onclick = () => void previewVoice(dd.value, btn);
 }
 
 let talkAudio: HTMLAudioElement | null = null;
