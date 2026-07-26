@@ -161,16 +161,30 @@ export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIn
   }
 }
 
-/** Conversational voice turn — the reply is spoken aloud, so keep it tight. */
-export async function talkReply(llm: Llm, history: ChatMessage[]): Promise<string> {
+/** Conversational turn — replies may be spoken aloud, so keep them tight. */
+export async function talkReply(llm: Llm, history: ChatMessage[], summary?: string | null): Promise<string> {
   return (await llm.chat([
     { role: 'system', content:
-      'You are assemble, a local voice assistant running on the user\'s machine. ' +
-      'Your reply is spoken aloud: answer in 1-3 short sentences, plain text only — ' +
-      'no markdown, no lists, no code blocks. Reply in the same language the user spoke ' +
-      '(English, Hindi, or Hinglish). Be direct and useful.' },
+      'You are assemble, a local assistant running on the user\'s machine. ' +
+      'Replies may be read aloud: answer in 1-3 short sentences, plain text only — ' +
+      'no markdown, no lists, no code blocks. Reply in the same language the user used ' +
+      '(English, Hindi, or Hinglish). Be direct and useful.' +
+      (summary ? `\n\nSummary of the conversation so far:\n${summary}` : '') },
     ...history.slice(-16),
   ], { maxTokens: 300, temperature: 0.5 })).trim();
+}
+
+/** Fold older turns into a running summary so long chats fit the context. */
+export async function foldTalkSummary(llm: Llm, prevSummary: string | null, turns: ChatMessage[]): Promise<string> {
+  return (await llm.chat([
+    { role: 'system', content:
+      'You maintain a compact running summary of a conversation between a user and an assistant. ' +
+      'Merge the new turns into the summary: keep facts, decisions, names, preferences, and open threads. ' +
+      'Plain text, under 200 words.' },
+    { role: 'user', content:
+      `${prevSummary ? `Summary so far:\n${prevSummary}\n\n` : ''}New turns:\n` +
+      turns.map(t => `${t.role}: ${t.content}`).join('\n') },
+  ], { maxTokens: 350, temperature: 0.2 })).trim();
 }
 
 // Rolling refinement: transcripts of any length are summarized chunk by

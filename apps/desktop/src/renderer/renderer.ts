@@ -646,67 +646,182 @@ function pageDesk() {
   $('#reteach').onclick = () => { state.setupReturn = true; state.setupStep = 1; setMode('setup'); };
 }
 
-/* ================= page: talk — stt → llm → tts ================= */
+/* ================= page: talk — chat + push-to-talk, stt → llm → tts ================= */
 
 type TalkPhase = 'idle' | 'listening' | 'thinking' | 'speaking';
+interface TalkChatRow { id: number; title: string; created_at: string }
+interface TalkMsgRow { id: number; role: 'user' | 'assistant'; content: string }
+
 const talk = {
   phase: 'idle' as TalkPhase,
+  chatId: Number(localStorage.getItem('talk-chat') || 0) || null as number | null,
+  chats: [] as TalkChatRow[],
   chunks: [] as Float32Array[],
   sawSpeech: false,
-  silentMs: 0,
-  level: 0,           // live mic rms while listening — drives the orb
-  maxTimer: null as ReturnType<typeof setTimeout> | null,
+  level: 0,          // live mic rms while listening — drives the orb
   raf: 0,
-  handsFree: true,    // auto-listen again after the reply finishes speaking
+  spaceDown: false,
+  keysBound: false,
 };
 
 function pageTalk() {
   $('#page').innerHTML = `
-    <div class="page-head">
-      <h2>Talk</h2>
-      <p>Ask anything — heard by whisper, answered by the local brain, spoken back. Click the orb.</p>
+    <div class="page-head talk-head">
+      <div><h2>Talk</h2><p>Hold <b>Space</b> to speak, or type. <b>Esc</b> interrupts.</p></div>
+      <select id="talk-voice" title="Voice for spoken replies"></select>
     </div>
-    <div class="talk-wrap">
-      <canvas id="talk-orb" width="360" height="360"></canvas>
-      <div id="talk-status" class="hint">tap the orb to talk</div>
-      <div class="talk-actions">
-        <label class="switch"><input type="checkbox" id="talk-handsfree" ${talk.handsFree ? 'checked' : ''}/>
-          <span>Keep listening after each answer</span></label>
-        <button class="quiet-link" id="talk-reset">Reset conversation</button>
-      </div>
-      <ul id="talk-log" class="feed talk-log"></ul>
+    <div class="talk-layout">
+      <aside class="talk-rail">
+        <button class="secondary" id="talk-new">+ New chat</button>
+        <ul id="talk-chats"></ul>
+      </aside>
+      <section class="talk-main">
+        <div id="talk-thread" class="talk-thread"></div>
+        <div class="talk-composer">
+          <canvas id="talk-orb" width="128" height="128" title="Hold Space to talk"></canvas>
+          <input id="talk-input" placeholder="Type a message — or hold Space to talk" />
+          <button class="secondary" id="talk-send">Send</button>
+          <button class="secondary danger" id="talk-stop" hidden>Stop</button>
+        </div>
+        <div id="talk-status" class="hint talk-status">hold Space and speak, or type</div>
+      </section>
     </div>`;
-  $('#talk-orb').onclick = () => {
-    if (talk.phase === 'idle') void talkListen();
-    else talkStopAll('tap the orb to talk');
-  };
-  $('#talk-handsfree').onchange = (e: any) => { talk.handsFree = e.target.checked; };
-  $('#talk-reset').onclick = async () => {
-    talkStopAll('conversation cleared — tap to talk');
-    $('#talk-log').innerHTML = '';
-    try { await fetch(`${SERVER}/talk/reset`, { method: 'POST' }); } catch { /* offline */ }
-  };
+  populateVoices();
+  bindTalkKeys();
+  $('#talk-new').onclick = () => void newTalkChat();
+  $('#talk-send').onclick = () => void talkSendText();
+  $('#talk-stop').onclick = () => talkInterrupt();
+  $('#talk-input').onkeydown = (e: KeyboardEvent) => { if (e.key === 'Enter') void talkSendText(); };
   startOrb();
+  void refreshTalkChats().then(() => {
+    if (!talk.chatId && talk.chats.length) talk.chatId = talk.chats[0].id;
+    if (talk.chatId) void loadTalkChat(talk.chatId);
+    else void newTalkChat();
+  });
+}
+
+/* ---- chats rail ---- */
+
+async function refreshTalkChats() {
+  try { talk.chats = await (await fetch(`${SERVER}/talk/chats`)).json(); }
+  catch { talk.chats = []; }
+  const ul = $('#talk-chats');
+  if (!ul) return;
+  ul.innerHTML = '';
+  for (const chat of talk.chats) {
+    const li = document.createElement('li');
+    li.className = chat.id === talk.chatId ? 'active' : '';
+    const name = document.createElement('span');
+    name.textContent = chat.title;
+    name.onclick = () => void loadTalkChat(chat.id);
+    const del = document.createElement('button');
+    del.className = 'ghost';
+    del.textContent = '\u2715';
+    del.title = 'Delete chat';
+    del.onclick = async e => {
+      e.stopPropagation();
+      await fetch(`${SERVER}/talk/chats/${chat.id}`, { method: 'DELETE' }).catch(() => {});
+      if (talk.chatId === chat.id) { talk.chatId = null; const t = $('#talk-thread'); if (t) t.innerHTML = ''; }
+      await refreshTalkChats();
+      if (!talk.chatId && talk.chats.length) void loadTalkChat(talk.chats[0].id);
+    };
+    li.append(name, del);
+    ul.appendChild(li);
+  }
+}
+
+async function newTalkChat() {
+  try {
+    const chat: TalkChatRow = await (await fetch(`${SERVER}/talk/chats`, { method: 'POST' })).json();
+    talk.chatId = chat.id;
+    localStorage.setItem('talk-chat', String(chat.id));
+    const t = $('#talk-thread');
+    if (t) t.innerHTML = '';
+    await refreshTalkChats();
+    talkStatus('new chat — hold Space and speak, or type');
+  } catch { talkStatus('local server unreachable'); }
+}
+
+async function loadTalkChat(id: number) {
+  talk.chatId = id;
+  localStorage.setItem('talk-chat', String(id));
+  try {
+    const msgs: TalkMsgRow[] = await (await fetch(`${SERVER}/talk/chats/${id}/messages`)).json();
+    const t = $('#talk-thread');
+    if (!t) return;
+    t.innerHTML = '';
+    for (const m of msgs) talkBubble(m.role, m.content, false);
+    t.scrollTop = t.scrollHeight;
+    void refreshTalkChats();
+  } catch { talkStatus('local server unreachable'); }
+}
+
+/* ---- thread ---- */
+
+function talkBubble(role: 'user' | 'assistant', text: string, scroll = true) {
+  const t = $('#talk-thread');
+  if (!t) return;
+  const row = document.createElement('div');
+  row.className = `bubble ${role === 'user' ? 'bubble-you' : 'bubble-ai'}`;
+  const body = document.createElement('span');
+  body.textContent = text;
+  row.appendChild(body);
+  if (role === 'assistant') {
+    const speak = document.createElement('button');
+    speak.className = 'ghost bubble-speak';
+    speak.textContent = '\uD83D\uDD0A';
+    speak.title = 'Read aloud';
+    speak.onclick = () => talkSpeak(text, false);
+    row.appendChild(speak);
+  }
+  t.appendChild(row);
+  if (scroll) t.scrollTop = t.scrollHeight;
+}
+
+function talkStatus(text: string) {
+  const el = $('#talk-status');
+  if (el) el.textContent = text;
+  const stop = $('#talk-stop');
+  if (stop) stop.hidden = talk.phase === 'idle';
 }
 
 function talkSetPhase(phase: TalkPhase, status: string) {
   talk.phase = phase;
-  const el = $('#talk-status');
-  if (el) el.textContent = status;
+  talkStatus(status);
 }
 
-async function talkListen() {
+/* ---- push-to-talk ---- */
+
+function bindTalkKeys() {
+  if (talk.keysBound) return;
+  talk.keysBound = true;
+  window.addEventListener('keydown', e => {
+    if (state.page !== 'talk' || state.mode !== 'app') return;
+    const target = e.target as HTMLElement;
+    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '');
+    if (e.code === 'Escape') { talkInterrupt(); return; }
+    if (e.code !== 'Space' || typing || e.repeat) return;
+    e.preventDefault();
+    if (!talk.spaceDown) { talk.spaceDown = true; talkListen(); }
+  });
+  window.addEventListener('keyup', e => {
+    if (e.code !== 'Space' || !talk.spaceDown) return;
+    talk.spaceDown = false;
+    if (state.page === 'talk' && talk.phase === 'listening') void talkSend();
+  });
+}
+
+function talkListen() {
+  if (talk.phase === 'thinking') return; // wait for the reply
   if (!state.engine) {
-    if (state.mode === 'app' && state.config.armed) { showSensorConsent(); return; }
-    toast('Microphone not running — flip Listening on.');
+    if (state.mode === 'app' && state.config.armed) showSensorConsent();
+    else talkStatus('microphone off — flip Listening on');
     return;
   }
-  speechSynthesis.cancel();
+  speechSynthesis.cancel(); // barge-in: talking over the reply stops it
   talk.chunks = [];
   talk.sawSpeech = false;
-  talk.silentMs = 0;
-  talk.maxTimer = setTimeout(() => void talkSend(), 20_000);
-  talkSetPhase('listening', 'listening…');
+  talkSetPhase('listening', 'listening — release Space to send');
 }
 
 function talkCollect(chunk: Float32Array) {
@@ -715,74 +830,102 @@ function talkCollect(chunk: Float32Array) {
   for (let i = 0; i < chunk.length; i++) s += chunk[i] * chunk[i];
   const rms = Math.sqrt(s / chunk.length);
   talk.level = talk.level * 0.7 + rms * 0.3;
-  const sr = state.engine?.sampleRate ?? 44100;
-  if (rms > 0.02) { talk.sawSpeech = true; talk.silentMs = 0; }
-  else talk.silentMs += (chunk.length / sr) * 1000;
-  if (talk.sawSpeech && talk.silentMs > 1100) void talkSend();
-}
-
-function talkLine(who: 'you' | 'assemble', text: string) {
-  const log = $('#talk-log');
-  if (!log) return;
-  const li = document.createElement('li');
-  li.className = who === 'you' ? 'talk-you' : 'talk-ai';
-  li.textContent = `${who === 'you' ? 'you' : '◉'}  ${text}`;
-  log.prepend(li);
-  while (log.children.length > 40) log.lastChild!.remove();
+  if (rms > 0.02) talk.sawSpeech = true;
 }
 
 async function talkSend() {
   if (talk.phase !== 'listening') return;
-  if (talk.maxTimer) clearTimeout(talk.maxTimer);
   const total = talk.chunks.reduce((n, c) => n + c.length, 0);
-  if (!talk.sawSpeech || total < 4000) { talkSetPhase('idle', 'heard nothing — tap to talk'); return; }
+  if (!talk.sawSpeech || total < 4000) { talkSetPhase('idle', 'heard nothing — hold Space and speak'); return; }
   const all = new Float32Array(total);
   let off = 0;
   for (const c of talk.chunks) { all.set(c, off); off += c.length; }
   talk.chunks = [];
-  talkSetPhase('thinking', 'thinking…');
+  talkSetPhase('thinking', 'thinking\u2026');
   try {
     const wav = encodeWav16k(all, state.engine?.sampleRate ?? 44100);
-    const r = await fetch(`${SERVER}/talk`, { method: 'POST', body: wav });
+    const r = await fetch(`${SERVER}/talk/chats/${talk.chatId}/audio`, { method: 'POST', body: wav });
     const data = await r.json();
-    if (data.transcript) talkLine('you', data.transcript);
-    if (!r.ok) { talkSetPhase('idle', data.error || 'failed — tap to retry'); return; }
-    talkLine('assemble', data.reply);
-    talkSpeak(data.reply);
+    if (data.transcript) talkBubble('user', data.transcript);
+    if (!r.ok) { talkSetPhase('idle', data.error || 'failed — try again'); return; }
+    talkBubble('assistant', data.reply);
+    void refreshTalkChats(); // title may have been set by the first message
+    talkSpeak(data.reply, true);
   } catch {
     talkSetPhase('idle', 'local server unreachable');
   }
 }
 
-function talkSpeak(text: string) {
-  const u = new SpeechSynthesisUtterance(text);
-  if (/[ऀ-ॿ]/.test(text)) u.lang = 'hi-IN'; // Devanagari → Hindi voice
-  u.rate = 1.05;
-  u.onstart = () => talkSetPhase('speaking', 'speaking — tap to interrupt');
-  u.onend = () => {
-    if (talk.phase !== 'speaking') return; // interrupted
-    if (talk.handsFree && state.page === 'talk') void talkListen();
-    else talkSetPhase('idle', 'tap the orb to talk');
+async function talkSendText() {
+  const input = $('#talk-input') as HTMLInputElement | null;
+  const text = input?.value.trim();
+  if (!text || !talk.chatId || talk.phase === 'thinking') return;
+  input!.value = '';
+  talkBubble('user', text);
+  talkSetPhase('thinking', 'thinking\u2026');
+  try {
+    const r = await fetch(`${SERVER}/talk/chats/${talk.chatId}/message`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
+    });
+    const data = await r.json();
+    if (!r.ok) { talkSetPhase('idle', data.error || 'failed — try again'); return; }
+    talkBubble('assistant', data.reply);
+    void refreshTalkChats();
+    talkSetPhase('idle', 'hold Space and speak, or type'); // typed replies stay silent — \uD83D\uDD0A reads them
+  } catch {
+    talkSetPhase('idle', 'local server unreachable');
+  }
+}
+
+/* ---- speech out ---- */
+
+function populateVoices() {
+  const sel = $('#talk-voice') as HTMLSelectElement | null;
+  if (!sel) return;
+  const fill = () => {
+    const voices = speechSynthesis.getVoices();
+    if (!voices.length) return;
+    const saved = localStorage.getItem('talk-voice') || '';
+    sel.innerHTML = '<option value="">System voice (auto)</option>' + voices
+      .filter(v => /^(en|hi)/i.test(v.lang))
+      .map(v => `<option value="${v.name}" ${v.name === saved ? 'selected' : ''}>${v.name} (${v.lang})</option>`)
+      .join('');
   };
-  u.onerror = () => talkSetPhase('idle', 'tap the orb to talk');
+  fill();
+  speechSynthesis.onvoiceschanged = fill;
+  sel.onchange = () => localStorage.setItem('talk-voice', sel.value);
+}
+
+function talkSpeak(text: string, partOfTurn: boolean) {
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  const chosen = localStorage.getItem('talk-voice');
+  if (chosen) {
+    const v = speechSynthesis.getVoices().find(x => x.name === chosen);
+    if (v) u.voice = v;
+  } else if (/[\u0900-\u097F]/.test(text)) {
+    u.lang = 'hi-IN'; // Devanagari → Hindi system voice
+  }
+  u.rate = 1.05;
+  u.onstart = () => talkSetPhase('speaking', 'speaking — Esc or Space interrupts');
+  u.onend = () => { if (talk.phase === 'speaking') talkSetPhase('idle', 'hold Space and speak, or type'); };
+  u.onerror = () => { if (partOfTurn) talkSetPhase('idle', 'hold Space and speak, or type'); };
   speechSynthesis.speak(u);
 }
 
-function talkStopAll(status: string) {
+function talkInterrupt() {
   speechSynthesis.cancel();
-  if (talk.maxTimer) clearTimeout(talk.maxTimer);
   talk.chunks = [];
-  talkSetPhase('idle', status);
+  talkSetPhase('idle', 'hold Space and speak, or type');
 }
 
 function talkLeave() {
-  if (talk.phase !== 'idle') talkStopAll('tap the orb to talk');
+  if (talk.phase !== 'idle') talkInterrupt();
   if (talk.raf) { cancelAnimationFrame(talk.raf); talk.raf = 0; }
 }
 
-// The orb: layered breathing rings; amplitude follows the mic while
-// listening, a synthetic voice-like wave while speaking, a slow pulse while
-// thinking. Amber on the app's paper/ink palette.
+/* ---- the orb: docked in the composer, phase-reactive ---- */
+
 function startOrb() {
   const canvas = $('#talk-orb') as HTMLCanvasElement | null;
   if (!canvas) return;
@@ -801,28 +944,26 @@ function startOrb() {
     amp += (target - amp) * 0.12;
     const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
     ctx.clearRect(0, 0, W, H);
-    const css = getComputedStyle(document.documentElement);
-    const amber = css.getPropertyValue('--amber').trim() || '#d9a441';
-    const base = 70;
+    const amber = getComputedStyle(document.documentElement).getPropertyValue('--amber').trim() || '#d9a441';
+    const base = 26;
     for (let ring = 3; ring >= 1; ring--) {
       ctx.beginPath();
-      const pts = 90;
+      const pts = 72;
       for (let i = 0; i <= pts; i++) {
         const a = (i / pts) * Math.PI * 2;
-        const wob = Math.sin(a * (2 + ring) + t * (1.2 + ring * 0.7)) * 6 * amp * ring
-                  + Math.sin(a * 5 - t * 2.1) * 4 * amp;
-        const r = base + ring * 16 * amp + wob;
+        const wob = Math.sin(a * (2 + ring) + t * (1.2 + ring * 0.7)) * 3 * amp * ring
+                  + Math.sin(a * 5 - t * 2.1) * 2 * amp;
+        const r = base + ring * 7 * amp + wob;
         const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.closePath();
       ctx.strokeStyle = amber;
       ctx.globalAlpha = 0.16 * ring;
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = 1.2;
       ctx.stroke();
     }
-    // core
-    const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, base);
+    const grad = ctx.createRadialGradient(cx, cy, 2, cx, cy, base);
     grad.addColorStop(0, amber);
     grad.addColorStop(1, 'transparent');
     ctx.globalAlpha = 0.25 + amp * 0.55;
@@ -836,6 +977,7 @@ function startOrb() {
   if (talk.raf) cancelAnimationFrame(talk.raf);
   talk.raf = requestAnimationFrame(draw);
 }
+
 
 /* ================= page: calls ================= */
 

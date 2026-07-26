@@ -23,3 +23,40 @@ describe('db', () => {
     kvDel(db, 'never-existed'); // no throw
   });
 });
+
+describe('talk chats', () => {
+  const freshTalk = () => {
+    const db = fresh();
+    // openDb doesn't create talk tables — the server does at boot
+    const { ensureTalkTables } = require('../src/db');
+    ensureTalkTables(db);
+    return db;
+  };
+
+  it('creates chats, titles from first user message, persists turns', () => {
+    const db = freshTalk();
+    const { createTalkChat, addTalkMessage, talkMessages, listTalkChats } = require('../src/db');
+    const chat = createTalkChat(db);
+    expect(chat.title).toBe('New chat');
+    addTalkMessage(db, chat.id, 'user', 'kya haal hai, assemble?');
+    addTalkMessage(db, chat.id, 'assistant', 'sab badhiya!');
+    expect(listTalkChats(db)[0].title).toBe('kya haal hai, assemble?');
+    const msgs = talkMessages(db, chat.id);
+    expect(msgs.length).toBe(2);
+    expect(msgs[0].role).toBe('user');
+  });
+
+  it('summary fold point filters messages; delete removes everything', () => {
+    const db = freshTalk();
+    const { createTalkChat, addTalkMessage, talkMessages, setTalkSummary, getTalkChat, deleteTalkChat } = require('../src/db');
+    const chat = createTalkChat(db);
+    const id1 = addTalkMessage(db, chat.id, 'user', 'one');
+    addTalkMessage(db, chat.id, 'assistant', 'two');
+    setTalkSummary(db, chat.id, 'talked about one', id1);
+    expect(getTalkChat(db, chat.id)!.summary).toBe('talked about one');
+    expect(talkMessages(db, chat.id, id1).length).toBe(1);
+    deleteTalkChat(db, chat.id);
+    expect(getTalkChat(db, chat.id)).toBeNull();
+    expect(talkMessages(db, chat.id).length).toBe(0);
+  });
+});

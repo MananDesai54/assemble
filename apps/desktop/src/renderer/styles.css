@@ -351,13 +351,38 @@ button { font: inherit; color: inherit; }
 .model-select .switch input[type='radio'] { accent-color: var(--amber); }
 
 /* ---------- talk ---------- */
-.talk-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-#talk-orb { width: 300px; height: 300px; cursor: pointer; }
-.talk-actions { display: flex; gap: 18px; align-items: center; }
-.talk-log { width: 100%; max-width: 640px; }
-.talk-log li { padding: 6px 10px; border-radius: 8px; margin: 4px 0; }
-.talk-log .talk-you { color: var(--dim); }
-.talk-log .talk-ai { background: color-mix(in srgb, var(--amber) 8%, transparent); }
+.talk-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.talk-head select {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 8px; font: inherit; max-width: 240px;
+}
+.talk-layout { display: flex; gap: 14px; min-height: 0; flex: 1; }
+.talk-rail { width: 180px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px; }
+.talk-rail ul { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+.talk-rail li {
+  display: flex; align-items: center; justify-content: space-between; gap: 4px;
+  padding: 7px 9px; border-radius: 8px; cursor: pointer;
+  color: var(--dim); font-size: 13px; border-left: 2px solid transparent;
+}
+.talk-rail li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.talk-rail li:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.talk-rail li.active { color: var(--ink); border-left-color: var(--amber); background: color-mix(in srgb, var(--amber) 7%, transparent); }
+.talk-rail li .ghost { opacity: 0; }
+.talk-rail li:hover .ghost { opacity: 0.7; }
+.talk-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.talk-thread { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 6px 2px; min-height: 200px; }
+.bubble { max-width: 78%; padding: 9px 12px; border-radius: 12px; line-height: 1.45; position: relative; }
+.bubble-you { align-self: flex-end; background: color-mix(in srgb, var(--ink) 6%, transparent); border-bottom-right-radius: 4px; }
+.bubble-ai { align-self: flex-start; background: color-mix(in srgb, var(--amber) 9%, transparent); border-bottom-left-radius: 4px; }
+.bubble-speak { position: absolute; right: -30px; top: 4px; opacity: 0; font-size: 13px; }
+.bubble-ai:hover .bubble-speak { opacity: 0.8; }
+.talk-composer { display: flex; align-items: center; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+#talk-orb { width: 52px; height: 52px; flex-shrink: 0; }
+.talk-composer input {
+  flex: 1; background: var(--bg); color: var(--ink); border: 1px solid var(--line);
+  border-radius: 10px; padding: 10px 12px; font: inherit;
+}
+.talk-status { text-align: center; padding: 6px 0 0; min-height: 22px; }
 
 /* ---------- settings tabs ---------- */
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }

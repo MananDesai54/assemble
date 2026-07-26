@@ -3,13 +3,15 @@ import { cors } from 'hono/cors';
 import type { ServerWebSocket } from 'bun';
 import type { Hono as HonoApp } from 'hono';
 import type { IntegrationContext } from '@assemble/core';
-import { Llm, summarizeCall, parseIntent, talkReply, type ChatMessage } from '@assemble/llm';
+import { Llm, summarizeCall, parseIntent, talkReply, foldTalkSummary } from '@assemble/llm';
 import { transcribe } from '@assemble/stt';
 import { executeAction } from '@assemble/actions';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import {
   openDb, kvGet, kvSet, kvDel,
   insertRecording, updateRecording, listRecordings, getRecording,
+  ensureTalkTables, createTalkChat, listTalkChats, getTalkChat, deleteTalkChat,
+  addTalkMessage, talkMessages, setTalkSummary,
 } from './db';
 import { registry, listIntegrations, connectIntegration, disconnectIntegration, startConfigured, stopAll } from './integrations';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
@@ -362,13 +364,53 @@ app.post('/agent/stop', async c => {
 
 /* ================= voice commands ================= */
 
-/* ================= talk — stt → llm → (renderer) tts ================= */
+/* ================= talk — persisted chats, stt → llm → (renderer) tts ================= */
 
-// One rolling conversation, in memory — Reset clears it. History capped so
-// long chats never outgrow the local context window.
-let talkHistory: ChatMessage[] = [];
+ensureTalkTables(db);
 
-app.post('/talk', async c => {
+app.get('/talk/chats', c => c.json(listTalkChats(db)));
+app.post('/talk/chats', c => c.json(createTalkChat(db)));
+app.delete('/talk/chats/:id', c => {
+  deleteTalkChat(db, Number(c.req.param('id')));
+  return c.json({ ok: true });
+});
+app.get('/talk/chats/:id/messages', c => c.json(talkMessages(db, Number(c.req.param('id')))));
+
+// Context per turn: system + rolling summary + turns since the fold point.
+// When the unfolded tail grows past 24 messages, the oldest 12 get folded
+// into the summary — the full transcript stays in the DB for display.
+async function talkTurn(chatId: number, userText: string): Promise<string> {
+  const chat = getTalkChat(db, chatId);
+  if (!chat) throw new Error('chat not found');
+  addTalkMessage(db, chatId, 'user', userText);
+  let { summary, summarized_upto } = chat;
+  let tail = talkMessages(db, chatId, summarized_upto);
+  if (tail.length > 24) {
+    const fold = tail.slice(0, 12);
+    const folded = await foldTalkSummary(llm, summary, fold.map(m => ({ role: m.role, content: m.content })));
+    summary = folded;
+    summarized_upto = fold[fold.length - 1].id;
+    setTalkSummary(db, chatId, folded, summarized_upto);
+    tail = tail.slice(12);
+  }
+  const reply = await talkReply(llm, tail.map(m => ({ role: m.role, content: m.content })), summary);
+  addTalkMessage(db, chatId, 'assistant', reply);
+  return reply;
+}
+
+app.post('/talk/chats/:id/message', async c => {
+  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
+  const { text } = await c.req.json<{ text?: string }>();
+  if (!text?.trim()) return c.json({ error: 'text required' }, 400);
+  try {
+    const reply = await talkTurn(Number(c.req.param('id')), text.trim());
+    return c.json({ reply });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
+app.post('/talk/chats/:id/audio', async c => {
   const body = await c.req.arrayBuffer();
   if (body.byteLength < 1000) return c.json({ error: 'no audio' }, 400);
   if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
@@ -384,21 +426,12 @@ app.post('/talk', async c => {
     rmSync(wavPath, { force: true }); // conversational audio is ephemeral
   }
   if (!transcript) return c.json({ error: 'heard nothing' }, 400);
-  talkHistory.push({ role: 'user', content: transcript });
   try {
-    const reply = await talkReply(llm, talkHistory);
-    talkHistory.push({ role: 'assistant', content: reply });
-    if (talkHistory.length > 24) talkHistory = talkHistory.slice(-24);
+    const reply = await talkTurn(Number(c.req.param('id')), transcript);
     return c.json({ transcript, reply });
   } catch (err) {
-    talkHistory.pop(); // keep history consistent on failure
     return c.json({ transcript, error: (err as Error).message }, 500);
   }
-});
-
-app.post('/talk/reset', c => {
-  talkHistory = [];
-  return c.json({ ok: true });
 });
 
 app.post('/voice', async c => {
