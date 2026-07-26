@@ -236,6 +236,7 @@ function handleLevel(rms: number) {
 
 function handleChunk(chunk: Float32Array) {
   if (voiceSess.active) voiceCollect(chunk);
+  if (talk.phase === 'listening') talkCollect(chunk);
   if (state.mode !== 'app') return;
   const now = performance.now();
   if (state.config.extras.whistleVolume && state.whistle) {
@@ -561,6 +562,7 @@ function stepReady() {
 
 const CORE_NAV: { page: string; label: string; icon: string }[] = [
   { page: 'desk', label: 'Desk', icon: '<svg viewBox="0 0 16 16"><rect x="1" y="1" width="6" height="6" rx="1.5"/><rect x="9" y="1" width="6" height="6" rx="1.5"/><rect x="1" y="9" width="6" height="6" rx="1.5"/><rect x="9" y="9" width="6" height="6" rx="1.5"/></svg>' },
+  { page: 'talk', label: 'Talk', icon: '<svg viewBox="0 0 16 16"><rect x="6" y="1.5" width="4" height="8" rx="2"/><path d="M3.5 7.5a4.5 4.5 0 0 0 9 0M8 12v2.5" fill="none" stroke-width="1.6" stroke-linecap="round"/></svg>' },
   { page: 'calls', label: 'Calls', icon: '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke-width="1.6"/><circle cx="8" cy="8" r="2"/></svg>' },
   { page: 'work', label: 'Workflows', icon: '<svg viewBox="0 0 16 16"><path d="M2 4l4 4-4 4M8 12h6" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
   { page: 'activity', label: 'Activity', icon: '<svg viewBox="0 0 16 16"><path d="M1 8h3l2-5 4 10 2-5h3" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>' },
@@ -606,7 +608,8 @@ function setPage(page: string) {
   el.classList.remove('page-in');
   void el.offsetWidth;
   el.classList.add('page-in');
-  const core: Record<string, () => void> = { desk: pageDesk, calls: pageCalls, work: pageWork, activity: pageActivity, settings: pageSettings };
+  if (page !== 'talk') talkLeave(); // stop tts + session when navigating away
+  const core: Record<string, () => void> = { desk: pageDesk, talk: pageTalk, calls: pageCalls, work: pageWork, activity: pageActivity, settings: pageSettings };
   (core[page] ?? INTEGRATION_PAGES[page] ?? pageDesk)();
 }
 
@@ -641,6 +644,197 @@ function pageDesk() {
     };
   }
   $('#reteach').onclick = () => { state.setupReturn = true; state.setupStep = 1; setMode('setup'); };
+}
+
+/* ================= page: talk — stt → llm → tts ================= */
+
+type TalkPhase = 'idle' | 'listening' | 'thinking' | 'speaking';
+const talk = {
+  phase: 'idle' as TalkPhase,
+  chunks: [] as Float32Array[],
+  sawSpeech: false,
+  silentMs: 0,
+  level: 0,           // live mic rms while listening — drives the orb
+  maxTimer: null as ReturnType<typeof setTimeout> | null,
+  raf: 0,
+  handsFree: true,    // auto-listen again after the reply finishes speaking
+};
+
+function pageTalk() {
+  $('#page').innerHTML = `
+    <div class="page-head">
+      <h2>Talk</h2>
+      <p>Ask anything — heard by whisper, answered by the local brain, spoken back. Click the orb.</p>
+    </div>
+    <div class="talk-wrap">
+      <canvas id="talk-orb" width="360" height="360"></canvas>
+      <div id="talk-status" class="hint">tap the orb to talk</div>
+      <div class="talk-actions">
+        <label class="switch"><input type="checkbox" id="talk-handsfree" ${talk.handsFree ? 'checked' : ''}/>
+          <span>Keep listening after each answer</span></label>
+        <button class="quiet-link" id="talk-reset">Reset conversation</button>
+      </div>
+      <ul id="talk-log" class="feed talk-log"></ul>
+    </div>`;
+  $('#talk-orb').onclick = () => {
+    if (talk.phase === 'idle') void talkListen();
+    else talkStopAll('tap the orb to talk');
+  };
+  $('#talk-handsfree').onchange = (e: any) => { talk.handsFree = e.target.checked; };
+  $('#talk-reset').onclick = async () => {
+    talkStopAll('conversation cleared — tap to talk');
+    $('#talk-log').innerHTML = '';
+    try { await fetch(`${SERVER}/talk/reset`, { method: 'POST' }); } catch { /* offline */ }
+  };
+  startOrb();
+}
+
+function talkSetPhase(phase: TalkPhase, status: string) {
+  talk.phase = phase;
+  const el = $('#talk-status');
+  if (el) el.textContent = status;
+}
+
+async function talkListen() {
+  if (!state.engine) {
+    if (state.mode === 'app' && state.config.armed) { showSensorConsent(); return; }
+    toast('Microphone not running — flip Listening on.');
+    return;
+  }
+  speechSynthesis.cancel();
+  talk.chunks = [];
+  talk.sawSpeech = false;
+  talk.silentMs = 0;
+  talk.maxTimer = setTimeout(() => void talkSend(), 20_000);
+  talkSetPhase('listening', 'listening…');
+}
+
+function talkCollect(chunk: Float32Array) {
+  talk.chunks.push(chunk.slice());
+  let s = 0;
+  for (let i = 0; i < chunk.length; i++) s += chunk[i] * chunk[i];
+  const rms = Math.sqrt(s / chunk.length);
+  talk.level = talk.level * 0.7 + rms * 0.3;
+  const sr = state.engine?.sampleRate ?? 44100;
+  if (rms > 0.02) { talk.sawSpeech = true; talk.silentMs = 0; }
+  else talk.silentMs += (chunk.length / sr) * 1000;
+  if (talk.sawSpeech && talk.silentMs > 1100) void talkSend();
+}
+
+function talkLine(who: 'you' | 'assemble', text: string) {
+  const log = $('#talk-log');
+  if (!log) return;
+  const li = document.createElement('li');
+  li.className = who === 'you' ? 'talk-you' : 'talk-ai';
+  li.textContent = `${who === 'you' ? 'you' : '◉'}  ${text}`;
+  log.prepend(li);
+  while (log.children.length > 40) log.lastChild!.remove();
+}
+
+async function talkSend() {
+  if (talk.phase !== 'listening') return;
+  if (talk.maxTimer) clearTimeout(talk.maxTimer);
+  const total = talk.chunks.reduce((n, c) => n + c.length, 0);
+  if (!talk.sawSpeech || total < 4000) { talkSetPhase('idle', 'heard nothing — tap to talk'); return; }
+  const all = new Float32Array(total);
+  let off = 0;
+  for (const c of talk.chunks) { all.set(c, off); off += c.length; }
+  talk.chunks = [];
+  talkSetPhase('thinking', 'thinking…');
+  try {
+    const wav = encodeWav16k(all, state.engine?.sampleRate ?? 44100);
+    const r = await fetch(`${SERVER}/talk`, { method: 'POST', body: wav });
+    const data = await r.json();
+    if (data.transcript) talkLine('you', data.transcript);
+    if (!r.ok) { talkSetPhase('idle', data.error || 'failed — tap to retry'); return; }
+    talkLine('assemble', data.reply);
+    talkSpeak(data.reply);
+  } catch {
+    talkSetPhase('idle', 'local server unreachable');
+  }
+}
+
+function talkSpeak(text: string) {
+  const u = new SpeechSynthesisUtterance(text);
+  if (/[ऀ-ॿ]/.test(text)) u.lang = 'hi-IN'; // Devanagari → Hindi voice
+  u.rate = 1.05;
+  u.onstart = () => talkSetPhase('speaking', 'speaking — tap to interrupt');
+  u.onend = () => {
+    if (talk.phase !== 'speaking') return; // interrupted
+    if (talk.handsFree && state.page === 'talk') void talkListen();
+    else talkSetPhase('idle', 'tap the orb to talk');
+  };
+  u.onerror = () => talkSetPhase('idle', 'tap the orb to talk');
+  speechSynthesis.speak(u);
+}
+
+function talkStopAll(status: string) {
+  speechSynthesis.cancel();
+  if (talk.maxTimer) clearTimeout(talk.maxTimer);
+  talk.chunks = [];
+  talkSetPhase('idle', status);
+}
+
+function talkLeave() {
+  if (talk.phase !== 'idle') talkStopAll('tap the orb to talk');
+  if (talk.raf) { cancelAnimationFrame(talk.raf); talk.raf = 0; }
+}
+
+// The orb: layered breathing rings; amplitude follows the mic while
+// listening, a synthetic voice-like wave while speaking, a slow pulse while
+// thinking. Amber on the app's paper/ink palette.
+function startOrb() {
+  const canvas = $('#talk-orb') as HTMLCanvasElement | null;
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d')!;
+  const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let t = 0;
+  let amp = 0;
+  const draw = () => {
+    if (!document.contains(canvas)) { talk.raf = 0; return; }
+    t += reduced ? 0 : 0.016;
+    const target =
+      talk.phase === 'listening' ? Math.min(1, talk.level * 14) :
+      talk.phase === 'speaking' ? 0.35 + 0.3 * Math.abs(Math.sin(t * 7.3) * Math.sin(t * 3.1)) :
+      talk.phase === 'thinking' ? 0.18 + 0.1 * Math.sin(t * 2.2) :
+      0.08 + 0.04 * Math.sin(t * 1.1);
+    amp += (target - amp) * 0.12;
+    const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
+    ctx.clearRect(0, 0, W, H);
+    const css = getComputedStyle(document.documentElement);
+    const amber = css.getPropertyValue('--amber').trim() || '#d9a441';
+    const base = 70;
+    for (let ring = 3; ring >= 1; ring--) {
+      ctx.beginPath();
+      const pts = 90;
+      for (let i = 0; i <= pts; i++) {
+        const a = (i / pts) * Math.PI * 2;
+        const wob = Math.sin(a * (2 + ring) + t * (1.2 + ring * 0.7)) * 6 * amp * ring
+                  + Math.sin(a * 5 - t * 2.1) * 4 * amp;
+        const r = base + ring * 16 * amp + wob;
+        const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = amber;
+      ctx.globalAlpha = 0.16 * ring;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+    // core
+    const grad = ctx.createRadialGradient(cx, cy, 4, cx, cy, base);
+    grad.addColorStop(0, amber);
+    grad.addColorStop(1, 'transparent');
+    ctx.globalAlpha = 0.25 + amp * 0.55;
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, base * (0.75 + amp * 0.3), 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    talk.raf = requestAnimationFrame(draw);
+  };
+  if (talk.raf) cancelAnimationFrame(talk.raf);
+  talk.raf = requestAnimationFrame(draw);
 }
 
 /* ================= page: calls ================= */

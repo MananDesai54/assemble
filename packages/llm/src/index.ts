@@ -161,6 +161,18 @@ export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIn
   }
 }
 
+/** Conversational voice turn — the reply is spoken aloud, so keep it tight. */
+export async function talkReply(llm: Llm, history: ChatMessage[]): Promise<string> {
+  return (await llm.chat([
+    { role: 'system', content:
+      'You are assemble, a local voice assistant running on the user\'s machine. ' +
+      'Your reply is spoken aloud: answer in 1-3 short sentences, plain text only — ' +
+      'no markdown, no lists, no code blocks. Reply in the same language the user spoke ' +
+      '(English, Hindi, or Hinglish). Be direct and useful.' },
+    ...history.slice(-16),
+  ], { maxTokens: 300, temperature: 0.5 })).trim();
+}
+
 // Rolling refinement: transcripts of any length are summarized chunk by
 // chunk — each round sees the summary so far plus the next slice, so nothing
 // past the model's context window is ever silently dropped.

@@ -350,6 +350,15 @@ button { font: inherit; color: inherit; }
 .byok-fields .secondary { align-self: flex-start; }
 .model-select .switch input[type='radio'] { accent-color: var(--amber); }
 
+/* ---------- talk ---------- */
+.talk-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+#talk-orb { width: 300px; height: 300px; cursor: pointer; }
+.talk-actions { display: flex; gap: 18px; align-items: center; }
+.talk-log { width: 100%; max-width: 640px; }
+.talk-log li { padding: 6px 10px; border-radius: 8px; margin: 4px 0; }
+.talk-log .talk-you { color: var(--dim); }
+.talk-log .talk-ai { background: color-mix(in srgb, var(--amber) 8%, transparent); }
+
 /* ---------- settings tabs ---------- */
 .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); }
 .tab {

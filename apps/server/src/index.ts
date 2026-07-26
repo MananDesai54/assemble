@@ -3,7 +3,7 @@ import { cors } from 'hono/cors';
 import type { ServerWebSocket } from 'bun';
 import type { Hono as HonoApp } from 'hono';
 import type { IntegrationContext } from '@assemble/core';
-import { Llm, summarizeCall, parseIntent } from '@assemble/llm';
+import { Llm, summarizeCall, parseIntent, talkReply, type ChatMessage } from '@assemble/llm';
 import { transcribe } from '@assemble/stt';
 import { executeAction } from '@assemble/actions';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -361,6 +361,45 @@ app.post('/agent/stop', async c => {
 });
 
 /* ================= voice commands ================= */
+
+/* ================= talk — stt → llm → (renderer) tts ================= */
+
+// One rolling conversation, in memory — Reset clears it. History capped so
+// long chats never outgrow the local context window.
+let talkHistory: ChatMessage[] = [];
+
+app.post('/talk', async c => {
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength < 1000) return c.json({ error: 'no audio' }, 400);
+  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
+  mkdirSync(VOICE_DIR, { recursive: true });
+  const wavPath = join(VOICE_DIR, `talk-${Date.now()}.wav`);
+  writeFileSync(wavPath, Buffer.from(body));
+  let transcript: string;
+  try {
+    transcript = (await transcribe(wavPath, { modelPath: activeWhisperPath() })).trim();
+  } catch (err) {
+    return c.json({ error: `transcription failed: ${(err as Error).message} — open Setup` }, 503);
+  } finally {
+    rmSync(wavPath, { force: true }); // conversational audio is ephemeral
+  }
+  if (!transcript) return c.json({ error: 'heard nothing' }, 400);
+  talkHistory.push({ role: 'user', content: transcript });
+  try {
+    const reply = await talkReply(llm, talkHistory);
+    talkHistory.push({ role: 'assistant', content: reply });
+    if (talkHistory.length > 24) talkHistory = talkHistory.slice(-24);
+    return c.json({ transcript, reply });
+  } catch (err) {
+    talkHistory.pop(); // keep history consistent on failure
+    return c.json({ transcript, error: (err as Error).message }, 500);
+  }
+});
+
+app.post('/talk/reset', c => {
+  talkHistory = [];
+  return c.json({ ok: true });
+});
 
 app.post('/voice', async c => {
   const body = await c.req.arrayBuffer();
