@@ -8,6 +8,7 @@ export interface SetupStatus {
   llamaCpp: boolean;
   whisperCpp: boolean;
   whisperModel: boolean;
+  kokoroModel: boolean;
   audiotap: boolean;
   swiftc: boolean;
   llmRunning: boolean;
@@ -102,6 +103,7 @@ export function toolStatus(whisperModelPath: string): Omit<SetupStatus, 'llmRunn
     llamaCpp: has('llama-server'),
     whisperCpp: has('whisper-cli'),
     whisperModel: existsSync(whisperModelPath) && statSync(whisperModelPath).size > 300_000_000,
+    kokoroModel: existsSync(KOKORO_MODEL_FILE),
     audiotap: process.platform === 'linux'
       ? has('ffmpeg')
       : existsSync(AUDIOTAP_BIN) && existsSync(KEYWATCH_BIN),
@@ -109,8 +111,11 @@ export function toolStatus(whisperModelPath: string): Omit<SetupStatus, 'llmRunn
   };
 }
 
-export type SetupStep = 'llama.cpp' | 'whisper-cpp' | 'whisper-model' | 'audiotap';
-export const SETUP_STEPS: SetupStep[] = ['llama.cpp', 'whisper-cpp', 'whisper-model', 'audiotap'];
+export type SetupStep = 'llama.cpp' | 'whisper-cpp' | 'whisper-model' | 'kokoro' | 'audiotap';
+export const SETUP_STEPS: SetupStep[] = ['llama.cpp', 'whisper-cpp', 'whisper-model', 'kokoro', 'audiotap'];
+
+// the q8 onnx weights kokoro-js downloads — presence = voice ready
+export const KOKORO_MODEL_FILE = join(MODELS_DIR, 'kokoro/onnx-community/Kokoro-82M-v1.0-ONNX/onnx/model_quantized.onnx');
 
 function streamCmd(cmd: string, args: string[], onLine: (l: string) => void): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -167,6 +172,14 @@ export async function runSetupStep(
       if (toolStatus(whisperModelPath).whisperModel) { onLine('already downloaded'); return; }
       onLine('downloading speech model…');
       return downloadWithProgress(whisperModelUrl, whisperModelPath, onLine);
+    case 'kokoro': {
+      if (existsSync(KOKORO_MODEL_FILE)) { onLine('already downloaded'); return; }
+      onLine('downloading voice model (~90 MB)…');
+      const { getKokoro } = await import('./tts');
+      await getKokoro(onLine);
+      onLine('voice ready');
+      return;
+    }
     case 'audiotap': {
       if (process.platform === 'linux') {
         if (!has('ffmpeg')) throw new Error('ffmpeg required — e.g. sudo apt install ffmpeg');

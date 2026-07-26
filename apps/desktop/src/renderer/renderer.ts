@@ -1464,6 +1464,7 @@ const SETUP_ROWS = [
   { key: 'llamaCpp', step: 'llama.cpp', label: 'AI engine — llama.cpp' },
   { key: 'whisperCpp', step: 'whisper-cpp', label: 'Speech engine — whisper.cpp' },
   { key: 'whisperModel', step: 'whisper-model', label: 'Speech model downloaded (your selection above)' },
+  { key: 'kokoroModel', step: 'kokoro', label: 'Voice — Kokoro neural TTS (~90 MB)' },
   { key: 'audiotap', step: 'audiotap', label: 'Call capture + hotkey helpers' },
   { key: 'llmRunning', step: 'llm-start', label: 'Brain running (downloads your selection on first start)' },
 ] as const;
