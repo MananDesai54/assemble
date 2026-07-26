@@ -12,6 +12,7 @@
 - [ ] Add memory for everything to tune model.
 - [ ] add speech to text for usage
 - [ ] computer use and browser inside https://huggingface.co/microsoft/Fara1.5-27B
+- [ ] fix installtion issue
 
 1. Slack-triggered workflows — my pick. Your own todo ("workflow around slack message to do different tasks based on messages") and it's the bridge between everything already built: messages flow in, Claude Code runner exists — nothing connects them. Concretely:
 
