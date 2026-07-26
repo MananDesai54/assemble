@@ -1,19 +1,27 @@
 // keywatch — listen-only global key tap:
-//  - prints "voice-chord" when Cmd+Shift is pressed together and released
-//    without any other key (any real key while holding cancels)
-//  - prints "quick-chord" on Fn+Space (the quick-ask panel hotkey — the Fn
-//    modifier is invisible to Electron's globalShortcut)
+//  - "voice-chord": Cmd+Shift pressed together and released with no other key
+//  - "quick-chord": Fn+Space (quick-ask panel — Fn is invisible to Electron)
+//  - "fn-down"/"fn-up": Fn held alone = push-to-talk; any key while holding
+//    prints "fn-cancel" (so fn+arrow etc never sends audio)
 // Never consumes or blocks events. Requires Input Monitoring permission.
 
 import CoreGraphics
 import Foundation
 
 var chordArmed = false
+var fnHeld = false
+var fnCancelled = false
+
+func emit(_ s: String) {
+    print(s)
+    fflush(stdout)
+}
 
 let callback: CGEventTapCallBack = { _, type, event, _ in
     let flags = event.flags
     let cmdShift = flags.contains(.maskCommand) && flags.contains(.maskShift)
     let otherMods = flags.contains(.maskControl) || flags.contains(.maskAlternate)
+    let fn = flags.contains(.maskSecondaryFn)
 
     switch type {
     case .flagsChanged:
@@ -21,17 +29,27 @@ let callback: CGEventTapCallBack = { _, type, event, _ in
             chordArmed = true
         } else if chordArmed && !flags.contains(.maskCommand) && !flags.contains(.maskShift) {
             chordArmed = false
-            print("voice-chord")
-            fflush(stdout)
+            emit("voice-chord")
         } else if otherMods {
             chordArmed = false
+        }
+        if fn && !fnHeld {
+            fnHeld = true
+            fnCancelled = false
+            emit("fn-down")
+        } else if !fn && fnHeld {
+            fnHeld = false
+            emit(fnCancelled ? "fn-abort" : "fn-up")
         }
     case .keyDown:
         chordArmed = false // any real key while holding = a normal shortcut
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        if fnHeld {
+            fnCancelled = true
+            emit("fn-cancel")
+        }
         if keyCode == 49 && flags.contains(.maskSecondaryFn) { // Fn+Space
-            print("quick-chord")
-            fflush(stdout)
+            emit("quick-chord")
         }
     default:
         break

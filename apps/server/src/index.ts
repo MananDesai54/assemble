@@ -556,9 +556,13 @@ if (existsSync(KEYWATCH_BIN)) {
   } catch { /* best effort */ }
   keywatch = spawn(KEYWATCH_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
   keywatch.stdout!.on('data', (buf: Buffer) => {
-    for (const line of buf.toString().split('\n')) {
-      if (line.trim() === 'voice-chord') broadcast({ kind: 'voice-hotkey' });
-      if (line.trim() === 'quick-chord') broadcast({ kind: 'quick-hotkey' });
+    for (const raw of buf.toString().split('\n')) {
+      const line = raw.trim();
+      if (line === 'voice-chord') broadcast({ kind: 'voice-hotkey' });
+      if (line === 'quick-chord') broadcast({ kind: 'quick-hotkey' });
+      if (line === 'fn-down') broadcast({ kind: 'ptt-down' });   // fn hold = push-to-talk
+      if (line === 'fn-up') broadcast({ kind: 'ptt-up' });
+      if (line === 'fn-cancel' || line === 'fn-abort') broadcast({ kind: 'ptt-cancel' });
     }
   });
   keywatch.stderr!.on('data', (buf: Buffer) => console.warn(buf.toString().trim()));

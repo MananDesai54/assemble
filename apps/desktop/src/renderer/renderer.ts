@@ -670,16 +670,15 @@ const talk = {
   chunks: [] as Float32Array[],
   sawSpeech: false,
   level: 0,          // live mic rms while listening — drives the orb
+  levels: [] as number[], // rolling waveform while listening
   raf: 0,
-  spaceDown: false,
   keysBound: false,
 };
 
 function pageTalk() {
   $('#page').innerHTML = `
     <div class="page-head talk-head">
-      <div><h2>Talk</h2><p>Hold <b>Space</b> to speak, or type. <b>Esc</b> interrupts.</p></div>
-      <select id="talk-voice" title="Voice for spoken replies"></select>
+      <div><h2>Talk</h2><p>Hold <b>fn</b> to speak, or type. <b>Esc</b> interrupts. Voice lives in Settings → Local AI.</p></div>
     </div>
     <div class="talk-layout">
       <aside class="talk-rail">
@@ -689,15 +688,15 @@ function pageTalk() {
       <section class="talk-main">
         <div id="talk-thread" class="talk-thread"></div>
         <div class="talk-composer">
-          <canvas id="talk-orb" width="128" height="128" title="Hold Space to talk"></canvas>
-          <input id="talk-input" placeholder="Type a message — or hold Space to talk" />
+          <canvas id="talk-orb" width="128" height="128" title="Hold fn to talk"></canvas>
+          <canvas id="talk-wave" height="88" hidden></canvas>
+          <input id="talk-input" placeholder="Type a message — or hold fn to talk" />
           <button class="secondary" id="talk-send">Send</button>
           <button class="secondary danger" id="talk-stop" hidden>Stop</button>
         </div>
-        <div id="talk-status" class="hint talk-status">hold Space and speak, or type</div>
+        <div id="talk-status" class="hint talk-status">hold fn and speak, or type</div>
       </section>
     </div>`;
-  populateVoices();
   bindTalkKeys();
   $('#talk-new').onclick = () => void newTalkChat();
   $('#talk-send').onclick = () => void talkSendText();
@@ -710,6 +709,12 @@ function pageTalk() {
     else void newTalkChat();
   });
 }
+
+const TALK_EMPTY = `
+  <div class="talk-empty">
+    <div class="talk-empty-mark">\u25c9</div>
+    <p>Hold <b>fn</b> and just say it.<br/>Heard by whisper, answered by the local brain, spoken by Kokoro.</p>
+  </div>`;
 
 /* ---- chats rail ---- */
 
@@ -747,9 +752,9 @@ async function newTalkChat() {
     talk.chatId = chat.id;
     localStorage.setItem('talk-chat', String(chat.id));
     const t = $('#talk-thread');
-    if (t) t.innerHTML = '';
+    if (t) t.innerHTML = TALK_EMPTY;
     await refreshTalkChats();
-    talkStatus('new chat — hold Space and speak, or type');
+    talkStatus('new chat — hold fn and speak, or type');
   } catch { talkStatus('local server unreachable'); }
 }
 
@@ -760,7 +765,7 @@ async function loadTalkChat(id: number) {
     const msgs: TalkMsgRow[] = await (await fetch(`${SERVER}/talk/chats/${id}/messages`)).json();
     const t = $('#talk-thread');
     if (!t) return;
-    t.innerHTML = '';
+    t.innerHTML = msgs.length ? '' : TALK_EMPTY;
     for (const m of msgs) talkBubble(m.role, m.content, false);
     t.scrollTop = t.scrollHeight;
     void refreshTalkChats();
@@ -772,6 +777,7 @@ async function loadTalkChat(id: number) {
 function talkBubble(role: 'user' | 'assistant', text: string, scroll = true) {
   const t = $('#talk-thread');
   if (!t) return;
+  t.querySelector('.talk-empty')?.remove();
   const row = document.createElement('div');
   row.className = `bubble ${role === 'user' ? 'bubble-you' : 'bubble-ai'}`;
   const body = document.createElement('span');
@@ -798,27 +804,26 @@ function talkStatus(text: string) {
 
 function talkSetPhase(phase: TalkPhase, status: string) {
   talk.phase = phase;
+  const input = $('#talk-input');
+  const wave = $('#talk-wave');
+  if (input && wave) {
+    input.hidden = phase === 'listening'; // the live waveform takes the input's place
+    wave.hidden = phase !== 'listening';
+  }
   talkStatus(status);
 }
 
 /* ---- push-to-talk ---- */
 
+// Push-to-talk is the fn key, held — delivered by keywatch through the server
+// (browsers cannot see fn, and Space collides with typing/accessibility).
+// Esc is the local interrupt.
 function bindTalkKeys() {
   if (talk.keysBound) return;
   talk.keysBound = true;
   window.addEventListener('keydown', e => {
     if (state.page !== 'talk' || state.mode !== 'app') return;
-    const target = e.target as HTMLElement;
-    const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(target?.tagName ?? '');
-    if (e.code === 'Escape') { talkInterrupt(); return; }
-    if (e.code !== 'Space' || typing || e.repeat) return;
-    e.preventDefault();
-    if (!talk.spaceDown) { talk.spaceDown = true; talkListen(); }
-  });
-  window.addEventListener('keyup', e => {
-    if (e.code !== 'Space' || !talk.spaceDown) return;
-    talk.spaceDown = false;
-    if (state.page === 'talk' && talk.phase === 'listening') void talkSend();
+    if (e.code === 'Escape') talkInterrupt();
   });
 }
 
@@ -830,9 +835,11 @@ function talkListen() {
     return;
   }
   speechSynthesis.cancel(); // barge-in: talking over the reply stops it
+  stopTalkAudio();
   talk.chunks = [];
+  talk.levels = [];
   talk.sawSpeech = false;
-  talkSetPhase('listening', 'listening — release Space to send');
+  talkSetPhase('listening', 'listening — release fn to send');
 }
 
 function talkCollect(chunk: Float32Array) {
@@ -841,13 +848,15 @@ function talkCollect(chunk: Float32Array) {
   for (let i = 0; i < chunk.length; i++) s += chunk[i] * chunk[i];
   const rms = Math.sqrt(s / chunk.length);
   talk.level = talk.level * 0.7 + rms * 0.3;
+  talk.levels.push(talk.level);
+  if (talk.levels.length > 160) talk.levels.shift();
   if (rms > 0.02) talk.sawSpeech = true;
 }
 
 async function talkSend() {
   if (talk.phase !== 'listening') return;
   const total = talk.chunks.reduce((n, c) => n + c.length, 0);
-  if (!talk.sawSpeech || total < 4000) { talkSetPhase('idle', 'heard nothing — hold Space and speak'); return; }
+  if (!talk.sawSpeech || total < 4000) { talkSetPhase('idle', 'heard nothing — hold fn and speak'); return; }
   const all = new Float32Array(total);
   let off = 0;
   for (const c of talk.chunks) { all.set(c, off); off += c.length; }
@@ -882,7 +891,7 @@ async function talkSendText(preset?: string) {
     if (!r.ok) { talkSetPhase('idle', data.error || 'failed — try again'); return; }
     talkBubble('assistant', data.reply);
     void refreshTalkChats();
-    talkSetPhase('idle', 'hold Space and speak, or type'); // typed replies stay silent — \uD83D\uDD0A reads them
+    talkSetPhase('idle', 'hold fn and speak, or type'); // typed replies stay silent — \uD83D\uDD0A reads them
   } catch {
     talkSetPhase('idle', 'local server unreachable');
   }
@@ -890,34 +899,81 @@ async function talkSendText(preset?: string) {
 
 /* ---- speech out ---- */
 
-async function populateVoices() {
-  const sel = $('#talk-voice') as HTMLSelectElement | null;
-  if (!sel) return;
-  const saved = localStorage.getItem('talk-voice') || '';
-  let kokoro: { id: string; label: string; lang: string }[] = [];
+const VOICE_PREVIEW_TEXT = 'Hey Manan — this is how I sound. Nice to meet you.';
+let previewAudio: HTMLAudioElement | null = null;
+
+function stopPreview() {
+  if (previewAudio) { previewAudio.pause(); previewAudio = null; }
+  speechSynthesis.cancel();
+}
+
+async function previewVoice(value: string, btn?: HTMLButtonElement) {
+  stopPreview();
+  if (btn) { btn.disabled = true; btn.textContent = '\u2026'; }
+  const restore = () => { if (btn) { btn.disabled = false; btn.textContent = '\u25b6'; } };
+  if (value.startsWith('k:')) {
+    try {
+      const r = await fetch(`${SERVER}/tts`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: VOICE_PREVIEW_TEXT, voice: value.slice(2) }),
+      });
+      if (!r.ok) { toast('Voice preview failed — model still downloading?'); restore(); return; }
+      const url = URL.createObjectURL(await r.blob());
+      previewAudio = new Audio(url);
+      previewAudio.onended = () => { URL.revokeObjectURL(url); restore(); };
+      void previewAudio.play();
+    } catch { toast('Local server unreachable.'); restore(); }
+  } else {
+    const u = new SpeechSynthesisUtterance(VOICE_PREVIEW_TEXT);
+    if (value.startsWith('s:')) {
+      const v = speechSynthesis.getVoices().find(x => x.name === value.slice(2));
+      if (v) u.voice = v;
+    }
+    u.onend = restore;
+    u.onerror = restore;
+    speechSynthesis.speak(u);
+  }
+}
+
+// Settings → Local AI → assistant voice: every voice previewable, Heart default.
+async function renderVoiceSettings(container: HTMLElement) {
+  let kokoro: { id: string; label: string }[] = [];
   try { kokoro = (await (await fetch(`${SERVER}/tts/voices`)).json()).voices; } catch { /* server offline */ }
-  const fill = () => {
-    if (!document.contains(sel)) return;
-    const sys = speechSynthesis.getVoices().filter(v => /^(en|hi)/i.test(v.lang));
-    sel.innerHTML =
-      '<option value="">System voice (auto)</option>' +
-      (kokoro.length ? `<optgroup label="Kokoro — local neural (~90 MB once)">${kokoro
-        .map(v => `<option value="k:${v.id}" ${`k:${v.id}` === saved ? 'selected' : ''}>${v.label}</option>`).join('')}</optgroup>` : '') +
-      (sys.length ? `<optgroup label="System">${sys
-        .map(v => `<option value="s:${v.name}" ${`s:${v.name}` === saved ? 'selected' : ''}>${v.name} (${v.lang})</option>`).join('')}</optgroup>` : '');
-  };
-  fill();
-  speechSynthesis.onvoiceschanged = fill;
-  sel.onchange = () => {
-    localStorage.setItem('talk-voice', sel.value);
-    if (sel.value.startsWith('k:')) toast('Kokoro voice — first use downloads the model once, then instant.');
-  };
+  const saved = localStorage.getItem('talk-voice') ?? 'k:af_heart';
+  container.innerHTML = `
+    <div class="model-head"><b>Assistant voice</b><span class="hint">Speaks Talk replies. Kokoro runs fully local (~90 MB once); Hindi replies use the system Hindi voice.</span></div>
+    <div class="voice-list" id="voice-list"></div>`;
+  const list = container.querySelector('#voice-list') as HTMLElement;
+  const rows: { value: string; label: string; note?: string }[] = [
+    ...kokoro.map(v => ({ value: `k:${v.id}`, label: v.label, note: 'Kokoro · local neural' })),
+    { value: '', label: 'System voice (auto)', note: 'OS voices, auto by language' },
+    ...speechSynthesis.getVoices().filter(v => /^(en|hi)/i.test(v.lang))
+      .map(v => ({ value: `s:${v.name}`, label: `${v.name} (${v.lang})`, note: 'System' })),
+  ];
+  for (const r of rows) {
+    const row = document.createElement('label');
+    row.className = 'voice-row';
+    row.innerHTML = `
+      <input type="radio" name="talk-voice" value="${r.value}" ${r.value === saved ? 'checked' : ''}/>
+      <span class="voice-name">${r.label}</span>
+      <span class="hint">${r.note ?? ''}</span>
+      <button class="ghost voice-play" title="Preview">\u25b6</button>`;
+    (row.querySelector('input') as HTMLInputElement).onchange = () => {
+      localStorage.setItem('talk-voice', r.value);
+      void previewVoice(r.value, row.querySelector('.voice-play') as HTMLButtonElement);
+    };
+    (row.querySelector('.voice-play') as HTMLButtonElement).onclick = e => {
+      e.preventDefault();
+      void previewVoice(r.value, e.currentTarget as HTMLButtonElement);
+    };
+    list.appendChild(row);
+  }
 }
 
 let talkAudio: HTMLAudioElement | null = null;
 
 function talkSpeak(text: string, partOfTurn: boolean) {
-  const chosen = localStorage.getItem('talk-voice') || '';
+  const chosen = localStorage.getItem('talk-voice') ?? 'k:af_heart';
   const isHindi = /[ऀ-ॿ]/.test(text);
   // Kokoro is English-only — Devanagari replies route to the system Hindi voice
   if (chosen.startsWith('k:') && !isHindi) { void kokoroSpeak(text, chosen.slice(2), partOfTurn); return; }
@@ -930,9 +986,9 @@ function talkSpeak(text: string, partOfTurn: boolean) {
     u.lang = 'hi-IN'; // Devanagari → Hindi system voice
   }
   u.rate = 1.05;
-  u.onstart = () => talkSetPhase('speaking', 'speaking — Esc or Space interrupts');
-  u.onend = () => { if (talk.phase === 'speaking') talkSetPhase('idle', 'hold Space and speak, or type'); };
-  u.onerror = () => { if (partOfTurn) talkSetPhase('idle', 'hold Space and speak, or type'); };
+  u.onstart = () => talkSetPhase('speaking', 'speaking — Esc interrupts, fn talks over it');
+  u.onend = () => { if (talk.phase === 'speaking') talkSetPhase('idle', 'hold fn and speak, or type'); };
+  u.onerror = () => { if (partOfTurn) talkSetPhase('idle', 'hold fn and speak, or type'); };
   speechSynthesis.speak(u);
 }
 
@@ -952,11 +1008,11 @@ async function kokoroSpeak(text: string, voice: string, partOfTurn: boolean) {
     }
     const url = URL.createObjectURL(await r.blob());
     talkAudio = new Audio(url);
-    talkAudio.onplay = () => talkSetPhase('speaking', 'speaking — Esc or Space interrupts');
+    talkAudio.onplay = () => talkSetPhase('speaking', 'speaking — Esc interrupts, fn talks over it');
     talkAudio.onended = () => {
       URL.revokeObjectURL(url);
       talkAudio = null;
-      if (talk.phase === 'speaking') talkSetPhase('idle', 'hold Space and speak, or type');
+      if (talk.phase === 'speaking') talkSetPhase('idle', 'hold fn and speak, or type');
     };
     void talkAudio.play();
   } catch {
@@ -972,7 +1028,7 @@ function talkInterrupt() {
   speechSynthesis.cancel();
   stopTalkAudio();
   talk.chunks = [];
-  talkSetPhase('idle', 'hold Space and speak, or type');
+  talkSetPhase('idle', 'hold fn and speak, or type');
 }
 
 function talkLeave() {
@@ -1028,6 +1084,26 @@ function startOrb() {
     ctx.arc(cx, cy, base * (0.75 + amp * 0.3), 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
+    // live waveform takes the input's place while listening
+    const wave = $('#talk-wave') as HTMLCanvasElement | null;
+    if (wave && !wave.hidden) {
+      const want = Math.max(200, wave.clientWidth * 2);
+      if (wave.width !== want) wave.width = want;
+      const wc = wave.getContext('2d')!;
+      wc.clearRect(0, 0, wave.width, wave.height);
+      wc.fillStyle = amber;
+      const n = 80;
+      const bw = wave.width / n;
+      const mid = wave.height / 2;
+      for (let i = 0; i < n; i++) {
+        const idx = talk.levels.length - n + i;
+        const lv = idx >= 0 ? talk.levels[idx] : 0;
+        const h = Math.max(3, Math.min(1, lv * 16) * (wave.height - 8));
+        wc.globalAlpha = 0.35 + (i / n) * 0.65; // newest brightest
+        wc.fillRect(i * bw + bw * 0.2, mid - h / 2, bw * 0.6, h);
+      }
+      wc.globalAlpha = 1;
+    }
     talk.raf = requestAnimationFrame(draw);
   };
   if (talk.raf) cancelAnimationFrame(talk.raf);
@@ -1228,6 +1304,7 @@ function renderSettingsTab() {
     body.innerHTML = `
       <p class="hint">All local — llama.cpp + whisper.cpp. Nothing leaves this Mac. Changing a model may need a new download (run "Install everything" after switching); the brain restarts automatically if it's running.</p>
       <div id="model-selectors" class="model-selectors"></div>
+      <div id="voice-settings" class="model-select"></div>
       <div class="setup-rows" id="setup-rows">
         ${SETUP_ROWS.map(r => `
           <div class="setup-row" data-step="${r.step}">
@@ -1238,6 +1315,7 @@ function renderSettingsTab() {
       </div>
       <button class="primary" id="install-all">Install everything</button>`;
     void renderModelSelectors($('#model-selectors'));
+    void renderVoiceSettings($('#voice-settings'));
     void refreshSetupStatus();
     $('#install-all').onclick = installEverything;
   }
@@ -1704,6 +1782,9 @@ function openWs() {
     if (payload.kind === 'slack-connected') { const s = $('#slack-status'); if (s) s.textContent = ''; }
     if (payload.kind === 'voice-hotkey') voiceToggle();
     if (payload.kind === 'quick-hotkey') window.assemble.quickToggle();
+    if (payload.kind === 'ptt-down' && state.page === 'talk' && state.mode === 'app') talkListen();
+    if (payload.kind === 'ptt-up' && talk.phase === 'listening') void talkSend();
+    if (payload.kind === 'ptt-cancel' && talk.phase === 'listening') talkInterrupt();
     if (payload.kind === 'setup-progress') setupProgressLine(payload);
     if (payload.kind === 'recording') void onRecordingEvent(payload);
     if (payload.kind === 'agent') {
