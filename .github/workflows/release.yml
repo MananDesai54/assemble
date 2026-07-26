@@ -13,10 +13,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # no intel-mac job: macos-13 (last x64) runners are retired — jobs
+          # queue forever. Intel macs get the installer's source fallback.
           - os: macos-14 # apple silicon
             arch: arm64
-          - os: macos-13 # intel
-            arch: x64
           - os: ubuntu-latest
             arch: x64
     runs-on: ${{ matrix.os }}
