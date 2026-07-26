@@ -14,6 +14,7 @@
 - [ ] computer use and browser inside https://huggingface.co/microsoft/Fara1.5-27B
 - [ ] fix installtion issue
 - [ ] local Ai performance
+- [ ] have tts which can do both english and hindi.
 
 1. Slack-triggered workflows — my pick. Your own todo ("workflow around slack message to do different tasks based on messages") and it's the bridge between everything already built: messages flow in, Claude Code runner exists — nothing connects them. Concretely:
 
