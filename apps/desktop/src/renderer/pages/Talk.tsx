@@ -5,11 +5,11 @@ import { AnimatePresence, motion } from 'motion/react';
 import { app, talk, useApp } from '../store';
 import {
   refreshTalkChats, newTalkChat, loadTalkChat, deleteTalkChat,
-  talkSendText, talkInterrupt, talkSpeak,
+  talkSendText, talkInterrupt, talkSpeak, setChatReasoning,
 } from '../controller';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Plus, Volume2, X } from 'lucide-react';
+import { Brain, Plus, Volume2, X } from 'lucide-react';
 
 function useOrb(orbRef: React.RefObject<HTMLCanvasElement | null>, waveRef: React.RefObject<HTMLCanvasElement | null>) {
   useEffect(() => {
@@ -209,6 +209,20 @@ export function TalkPage() {
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') send(); }}
                 />
+                {(() => {
+                  const on = (talk.chats.find(c => c.id === talk.chatId)?.reasoning ?? 1) === 1;
+                  return (
+                    <button
+                      title={on ? 'Reasoning on — thinks before answering (slower)' : 'Reasoning off — answers directly'}
+                      onClick={() => void setChatReasoning(!on)}
+                      className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition-colors ${
+                        on ? 'border-acc/40 bg-acc/10 text-acc' : 'border-line text-dim hover:text-ink'
+                      }`}
+                    >
+                      <Brain className="size-4.5" />
+                    </button>
+                  );
+                })()}
                 <Button variant="secondary" onClick={send}>Send</Button>
               </>
             )}

@@ -492,6 +492,15 @@ export async function talkSend() {
   }
 }
 
+export async function setChatReasoning(on: boolean) {
+  if (!talk.chatId) return;
+  const row = talk.chats.find(c => c.id === talk.chatId);
+  if (row) { row.reasoning = on ? 1 : 0; emit(); }
+  await fetch(`${SERVER}/talk/chats/${talk.chatId}/reasoning`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on }),
+  }).catch(() => {});
+}
+
 export async function talkSendText(text: string) {
   if (!text || !talk.chatId || talk.phase === 'thinking') return;
   talk.msgs.push({ role: 'user', content: text });

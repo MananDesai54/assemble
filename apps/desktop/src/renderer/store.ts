@@ -25,7 +25,7 @@ export interface IntegrationInfo {
   connected: boolean; detail?: string; fields: IntegrationField[];
 }
 
-export interface TalkChatRow { id: number; title: string; created_at: string }
+export interface TalkChatRow { id: number; title: string; created_at: string; reasoning: number }
 export interface TalkMsg { role: 'user' | 'assistant'; content: string }
 
 export const SERVER = 'http://127.0.0.1:4817';

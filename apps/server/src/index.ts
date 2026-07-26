@@ -11,7 +11,7 @@ import {
   openDb, kvGet, kvSet, kvDel,
   insertRecording, updateRecording, listRecordings, getRecording,
   ensureTalkTables, createTalkChat, listTalkChats, getTalkChat, deleteTalkChat,
-  addTalkMessage, talkMessages, setTalkSummary,
+  addTalkMessage, talkMessages, setTalkSummary, setTalkReasoning,
 } from './db';
 import { registry, listIntegrations, connectIntegration, disconnectIntegration, startConfigured, stopAll } from './integrations';
 import { AgentRunner, initAgentTables, listSessions, getSession, expandDir } from './agent';
@@ -48,7 +48,7 @@ const byokConfig = () => ({
 function buildLlm(): Llm {
   const b = byokConfig();
   if (b.source === 'byok' && b.key) return new Llm({ url: b.url, apiKey: b.key, model: b.model || 'gpt-5-mini' });
-  return new Llm();
+  return new Llm({ templateControls: true }); // local llama-server understands chat_template_kwargs
 }
 let llm = buildLlm();
 const llmRuntime = new LlmRuntime();
@@ -56,7 +56,6 @@ const recorder = new Recorder({ binPath: AUDIOTAP_BIN, dir: RECORDINGS_DIR });
 const agents = new AgentRunner();
 const selectedWhisper = () => kvGet(db, 'whisper_model') || DEFAULT_WHISPER;
 const selectedLlm = () => kvGet(db, 'llm_model') || DEFAULT_LLM;
-const reasoningOn = () => kvGet(db, 'llm_reasoning') !== '0'; // default: model's natural behavior
 const activeWhisperPath = () => whisperPath(selectedWhisper());
 
 const ctx: IntegrationContext = {
@@ -105,7 +104,6 @@ app.get('/setup/models', c => {
   return c.json({
     whisper: { options: WHISPER_MODELS, selected: selectedWhisper() },
     llm: { options: LLM_MODELS, selected: selectedLlm() },
-    reasoning: reasoningOn(),
     byok: { source: b.source, url: b.url, model: b.model, hasKey: Boolean(b.key) },
   });
 });
@@ -136,16 +134,16 @@ app.post('/setup/byok', async c => {
 });
 
 app.post('/setup/models', async c => {
-  const { whisper, llm: llmId, reasoning } = await c.req.json<{ whisper?: string; llm?: string; reasoning?: boolean }>();
+  const { whisper, llm: llmId } = await c.req.json<{ whisper?: string; llm?: string }>();
   if (whisper && WHISPER_MODELS.some(m => m.id === whisper)) kvSet(db, 'whisper_model', whisper);
-  if (typeof reasoning === 'boolean') kvSet(db, 'llm_reasoning', reasoning ? '1' : '0');
-  if (llmId && LLM_MODELS.some(m => m.id === llmId)) kvSet(db, 'llm_model', llmId);
-  // model or reasoning changed while the engine is up → relaunch with new args
-  if ((llmId || typeof reasoning === 'boolean') && llmRuntime.running) {
-    llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf, reasoningOn());
-    llmCheckedAt = 0;
+  if (llmId && LLM_MODELS.some(m => m.id === llmId)) {
+    kvSet(db, 'llm_model', llmId);
+    if (llmRuntime.running) {
+      llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(llmId).hf);
+      llmCheckedAt = 0;
+    }
   }
-  return c.json({ whisper: selectedWhisper(), llm: selectedLlm(), reasoning: reasoningOn() });
+  return c.json({ whisper: selectedWhisper(), llm: selectedLlm() });
 });
 
 let setupRunning = false;
@@ -156,7 +154,7 @@ app.post('/setup/run', async c => {
   setupRunning = true;
   try {
     if (step === 'llm-start') {
-      llmRuntime.start(emit, llmModel(selectedLlm()).hf, reasoningOn());
+      llmRuntime.start(emit, llmModel(selectedLlm()).hf);
       kvSet(db, 'llm_enabled', '1');
       // wait for health (model may be downloading — poll up to 30 min)
       const deadline = Date.now() + 30 * 60_000;
@@ -373,6 +371,12 @@ ensureTalkTables(db);
 
 app.get('/talk/chats', c => c.json(listTalkChats(db)));
 app.post('/talk/chats', c => c.json(createTalkChat(db)));
+app.post('/talk/chats/:id/reasoning', async c => {
+  const { on } = await c.req.json<{ on?: boolean }>();
+  if (typeof on !== 'boolean') return c.json({ error: 'on: boolean required' }, 400);
+  setTalkReasoning(db, Number(c.req.param('id')), on);
+  return c.json({ ok: true, reasoning: on });
+});
 app.delete('/talk/chats/:id', c => {
   deleteTalkChat(db, Number(c.req.param('id')));
   return c.json({ ok: true });
@@ -396,7 +400,7 @@ async function talkTurn(chatId: number, userText: string): Promise<string> {
     setTalkSummary(db, chatId, folded, summarized_upto);
     tail = tail.slice(12);
   }
-  const reply = await talkReply(llm, tail.map(m => ({ role: m.role, content: m.content })), summary);
+  const reply = await talkReply(llm, tail.map(m => ({ role: m.role, content: m.content })), summary, chat.reasoning === 1);
   addTalkMessage(db, chatId, 'assistant', reply);
   return reply;
 }
@@ -559,7 +563,7 @@ void startConfigured(ctx);
 
 // resume the local LLM if the user enabled it before
 if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
-  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf, reasoningOn());
+  llmRuntime.start(line => broadcast({ kind: 'setup-progress', step: 'llm-start', line }), llmModel(selectedLlm()).hf);
 }
 
 // global hotkeys via listen-only event tap (needs Input Monitoring):

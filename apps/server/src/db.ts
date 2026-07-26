@@ -90,6 +90,7 @@ export interface TalkChat {
   title: string;
   summary: string | null;
   summarized_upto: number; // message id already folded into summary
+  reasoning: number; // 0/1 — model thinks before answering in this chat
   created_at: string;
 }
 
@@ -119,6 +120,11 @@ export function ensureTalkTables(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_talk_messages_chat ON talk_messages (chat_id, id);
   `);
+  // per-chat reasoning toggle (added later — migrate existing tables)
+  const cols = db.query<{ name: string }, []>(`PRAGMA table_info(talk_chats)`).all();
+  if (!cols.some(c => c.name === 'reasoning')) {
+    db.exec(`ALTER TABLE talk_chats ADD COLUMN reasoning INTEGER NOT NULL DEFAULT 1`);
+  }
 }
 
 export function createTalkChat(db: Database): TalkChat {
@@ -155,6 +161,10 @@ export function talkMessages(db: Database, chatId: number, afterId = 0): TalkMes
   return db.query<TalkMessage, [number, number]>(
     `SELECT * FROM talk_messages WHERE chat_id = ? AND id > ? ORDER BY id ASC`,
   ).all(chatId, afterId);
+}
+
+export function setTalkReasoning(db: Database, chatId: number, on: boolean): void {
+  db.run(`UPDATE talk_chats SET reasoning = ? WHERE id = ?`, [on ? 1 : 0, chatId]);
 }
 
 export function setTalkSummary(db: Database, chatId: number, summary: string, upto: number): void {
