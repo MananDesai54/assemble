@@ -8,11 +8,25 @@ permissions:
   contents: write
 
 jobs:
+  prepare:
+    # create the draft release up front — electron-builder's find-or-create
+    # is not atomic and races into duplicate drafts (even a single mac job
+    # publishing zip + dmg concurrently). With the draft pre-created, every
+    # job only ever finds and uploads.
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" \
+              --draft --verify-tag --title "$GITHUB_REF_NAME" --generate-notes
+
   build:
+    needs: prepare
     strategy:
       fail-fast: false
-      # serial: parallel jobs race electron-builder's find-or-create draft
-      # and produce duplicate draft releases for the same tag
+      # serial: belt-and-braces against upload races
       max-parallel: 1
       matrix:
         include:
