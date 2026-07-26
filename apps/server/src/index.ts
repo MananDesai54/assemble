@@ -463,6 +463,24 @@ app.post('/talk/chats/:id/audio', async c => {
   }
 });
 
+// pure speech-to-text — no LLM, no side effects (quick panel dictation)
+app.post('/stt', async c => {
+  const body = await c.req.arrayBuffer();
+  if (body.byteLength < 1000) return c.json({ error: 'no audio' }, 400);
+  mkdirSync(VOICE_DIR, { recursive: true });
+  const wavPath = join(VOICE_DIR, `stt-${Date.now()}.wav`);
+  writeFileSync(wavPath, Buffer.from(body));
+  try {
+    const transcript = (await transcribe(wavPath, { modelPath: activeWhisperPath() })).trim();
+    if (!transcript) return c.json({ error: 'heard nothing' }, 400);
+    return c.json({ transcript });
+  } catch (err) {
+    return c.json({ error: `transcription failed: ${(err as Error).message} — open Setup` }, 503);
+  } finally {
+    rmSync(wavPath, { force: true }); // dictation audio is ephemeral
+  }
+});
+
 app.post('/voice', async c => {
   const body = await c.req.arrayBuffer();
   if (body.byteLength < 1000) return c.json({ error: 'no audio' }, 400);
