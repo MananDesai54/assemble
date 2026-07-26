@@ -442,13 +442,32 @@ if (kvGet(db, 'llm_enabled') === '1' && Bun.which('llama-server')) {
 }
 
 // global double-space hotkey (listen-only event tap; needs Input Monitoring)
+let keywatch: ReturnType<typeof spawn> | null = null;
 if (existsSync(KEYWATCH_BIN)) {
-  const kw = spawn(KEYWATCH_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
-  kw.stdout.on('data', (buf: Buffer) => {
+  keywatch = spawn(KEYWATCH_BIN, [], { stdio: ['ignore', 'pipe', 'pipe'] });
+  keywatch.stdout!.on('data', (buf: Buffer) => {
     for (const line of buf.toString().split('\n')) {
       if (line.trim() === 'voice-chord') broadcast({ kind: 'voice-hotkey' });
     }
   });
-  kw.stderr.on('data', (buf: Buffer) => console.warn(buf.toString().trim()));
-  kw.on('exit', code => console.warn(`keywatch exited (${code}) — double-space hotkey off`));
+  keywatch.stderr!.on('data', (buf: Buffer) => console.warn(buf.toString().trim()));
+  keywatch.on('exit', code => console.warn(`keywatch exited (${code}) — double-space hotkey off`));
 }
+
+// The desktop app SIGTERMs this server on quit — take the children with us
+// (llama-server alone holds gigabytes of RAM when orphaned).
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    llmRuntime.stop();
+    keywatch?.kill('SIGTERM');
+    if (recorder.active) { await recorder.stop().catch(() => {}); } // audiotap finalizes its WAV on SIGINT
+    await stopAll();
+  } finally {
+    process.exit(0);
+  }
+}
+process.on('SIGTERM', () => void shutdown());
+process.on('SIGINT', () => void shutdown());
