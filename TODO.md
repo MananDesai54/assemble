@@ -10,3 +10,4 @@
 - [ ] Have workflow around slack message to do different task based on messages.
 - [ ] agentic calls and tool calling but local/open weight only.
 - [ ] Add memory for everything to tune model.
+- [ ] add speech to text for usage
