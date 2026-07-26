@@ -8,7 +8,9 @@
 set -e
 
 GH_REPO="MananDesai54/assemble"
-API="https://api.github.com/repos/$GH_REPO/releases/latest"
+# release list (newest first) — not /releases/latest, so a release without
+# binaries (bad tag, docs-only) can never break the install
+API="https://api.github.com/repos/$GH_REPO/releases?per_page=20"
 
 say() { printf '\033[1m◉ %s\033[0m\n' "$*"; }
 
@@ -60,6 +62,7 @@ case "$OS-$ARCH" in
   *) say "No prebuilt binary for $OS/$ARCH — installing from source."; install_from_source ;;
 esac
 
+# first match across the list = asset from the newest release that has one
 URL="$(curl -fsSL "$API" 2>/dev/null \
   | grep -o "\"browser_download_url\": *\"[^\"]*\"" \
   | grep -E "$PATTERN" | head -1 | sed 's/.*"\(https[^"]*\)"/\1/')" || true
