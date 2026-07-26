@@ -1,28 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%">
   <defs>
-    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#6366F1" />
-      <stop offset="100%" stop-color="#A855F7" />
-    </linearGradient>
-    <linearGradient id="grad2" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#06B6D4" />
-      <stop offset="100%" stop-color="#3B82F6" />
+    <linearGradient id="mono" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F5F5F7" />
+      <stop offset="100%" stop-color="#8E8E96" />
     </linearGradient>
   </defs>
 
   <!-- Outer Container / Background -->
-  <rect width="400" height="400" rx="40" fill="#0F172A"/>
+  <rect width="400" height="400" rx="40" fill="#111114"/>
 
   <!-- Assembled Blocks forming "A" -->
   <g transform="translate(100, 80)">
     <!-- Left Pillar -->
-    <path d="M 30 190 L 80 80 L 110 80 L 60 190 Z" fill="url(#grad1)" />
+    <path d="M 30 190 L 80 80 L 110 80 L 60 190 Z" fill="url(#mono)" />
     <!-- Right Pillar -->
-    <path d="M 170 190 L 120 80 L 90 80 L 140 190 Z" fill="url(#grad2)" />
+    <path d="M 170 190 L 120 80 L 90 80 L 140 190 Z" fill="url(#mono)" opacity="0.65" />
     <!-- Top Cap / Connector -->
-    <path d="M 100 30 L 135 90 L 65 90 Z" fill="#6366F1" />
+    <path d="M 100 30 L 135 90 L 65 90 Z" fill="#F5F5F7" />
     <!-- Center Assembled Crossbar -->
-    <polygon points="65,130 135,130 150,155 50,155" fill="url(#grad2)" opacity="0.9"/>
+    <polygon points="65,130 135,130 150,155 50,155" fill="url(#mono)" opacity="0.85"/>
   </g>
 
   <!-- Typography -->
