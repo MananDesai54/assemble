@@ -1,11 +1,14 @@
 <p align="center"><img src="assets/logo-name.svg" alt="assemble" width="180" /></p>
 
-**Your desk is the input device.** Tap corners, knock rhythms, whistle, blow, wave — assemble turns everyday physical gestures into programmable actions. No extra hardware: the microphone does most of it, the camera (optional, local-only) does the rest.
+**Your desk is the input device.** Knock it, whistle at it, wave over it, talk to it — assemble is a local-first desk assistant that turns physical gestures and voice into programmable actions, with a fully on-device AI stack (whisper + Gemma + Kokoro). No extra hardware: the microphone does most of it, the camera (optional, local-only) does the rest.
 
 - **Tap a corner** of the desk → its action runs. Four corners × three rhythms (1×, 2×, 3× knocks) = up to twelve buttons.
+- **Talk to it** — hold **fn** and speak; whisper hears you, the local brain answers, Kokoro speaks back. Persisted chats, pick a voice.
+- **Fn+Space anywhere** → floating quick-ask panel (Spotlight-style), answer inline or continue in the app.
 - **Whistle** and slide the pitch up/down → system volume follows, like an invisible knob.
 - **Blow at the mic** → one more trigger (classic: sleep the display).
 - **Wave a hand** left or right of the screen → two more, via low-res local motion detection.
+- **Record calls** with live transcription; **Slack** messages stream in; **Claude Code** runs from the Workflows page.
 
 ![assemble](docs/screenshots/landing.png)
 
@@ -19,7 +22,7 @@ uploaded, no telemetry, no accounts:
 | App config (calibration, actions, theme) | `~/Library/Application Support/assemble/config.json` | `~/.config/assemble/` |
 | SQLite (Slack messages, recordings, sessions, tokens) | `~/Library/Application Support/assemble/data/` | `~/.local/share/assemble/data/` |
 | Call recordings + voice clips | `…/assemble/data/recordings`, `…/data/voice` | same, under `.local/share` |
-| Whisper models | `…/assemble/models/` | `~/.local/share/assemble/models/` |
+| Whisper + Kokoro models | `…/assemble/models/` | `~/.local/share/assemble/models/` |
 | Brain GGUFs (Gemma / gpt-oss) | `~/Library/Caches/llama.cpp/` | `~/.cache/llama.cpp/` |
 
 Override the server storage root with `ASSEMBLE_HOME=/path`.
@@ -111,9 +114,9 @@ Click a corner card — each corner takes up to three actions, one per knock pat
 
 ![Desk page](docs/screenshots/app.png)
 
-- On every launch, a **Start listening?** prompt asks before the mic (and camera, if waves are enabled) turns on — nothing auto-starts.
+- Flipping **Listening** on asks for consent before the mic (and camera, if waves are enabled) starts; once granted, the switch's state persists and sensors resume silently on later launches.
 - Every sound the app hears ripples from the mic dot; a recognized tap lights its corner and shows up in **Activity** with its confidence.
-- **Listening** switch (top right, or the ◉ menubar item) is the master arm/disarm — flip it off for meetings.
+- **Listening** switch (bottom of the sidebar, or the ◉ menubar item) is the master arm/disarm — flip it off for meetings.
 - **Sensitivity**: left = softer taps register; right = only hard knocks.
 - **☀/☾** toggles light/dark; follows your system by default.
 - Closing the window hides it — listening continues in the background. Quit from the menubar.
@@ -136,8 +139,9 @@ Click a corner card — each corner takes up to three actions, one per knock pat
 TypeScript monorepo on Bun workspaces:
 
 ```
-apps/desktop      Electron app (esbuild-bundled TS)
-apps/server       local daemon :4817 — Slack intake, SQLite, AI endpoints
+apps/desktop      Electron app — React 19 + Tailwind v4 + shadcn-style UI +
+                  framer-motion, esbuild-bundled; WebGL "Threads" background
+apps/server       local daemon :4817 — Slack intake, SQLite, AI endpoints (talk, TTS, setup)
 packages/core     shared types + zone model
 packages/dsp      pure audio DSP — no Electron dependency, tested in Node
 packages/actions  action model + macOS executor
@@ -166,6 +170,7 @@ with one click and live progress:
 
 - llama.cpp + whisper.cpp (via Homebrew)
 - your chosen **speech model** — whisper small (0.5 GB, fastest) / large-v3-turbo (1.6 GB, recommended, strong Hindi/Hinglish) / large-v3 (2.9 GB, max accuracy); language auto-detected
+- **Kokoro** neural TTS (~90 MB ONNX) — the voice that speaks Talk replies
 - call capture + hotkey helpers (compiled locally)
 - your chosen **brain** via llama-server — Gemma 4 E4B (light, 8 GB RAM) / **Gemma 4 12B** (recommended, strong multilingual) / Gemma 4 26B-A4B (big MoE, 24 GB+) / gpt-oss-20b (OpenAI open-weight, English-first)
 
@@ -197,6 +202,21 @@ public URL. **New messages only**, two transports:
 the local database and the live feed on the Workflows page. DMs need
 the `im:read` user scope on your app — without it they're skipped automatically.
 `.env` (`SLACK_USER_TOKEN`) works as a fallback for headless runs.
+
+### Talk — voice chat with the local brain
+
+The **Talk** page is a full voice assistant, all on-device: hold **fn** and speak
+(release to send), or just type. whisper transcribes, the local brain replies in 1–3
+spoken sentences, **Kokoro** (neural TTS, ~90 MB ONNX) says it out loud — pick from
+11 voices in Settings → Local AI, with preview. Chats persist with automatic titles;
+long conversations fold older turns into a running summary so context never
+overflows. **Esc** interrupts; talking over a reply barges in. Devanagari replies
+automatically switch to the system Hindi voice (Kokoro is English-only).
+
+### Quick ask — Fn+Space, anywhere
+
+A frameless Spotlight-style panel from any app: **Fn+Space**, type, **↵** for an
+inline answer or **⌘↵** to continue in the app as a fresh Talk chat. **Esc** closes.
 
 ### Voice commands
 
