@@ -890,29 +890,41 @@ async function talkSendText(preset?: string) {
 
 /* ---- speech out ---- */
 
-function populateVoices() {
+async function populateVoices() {
   const sel = $('#talk-voice') as HTMLSelectElement | null;
   if (!sel) return;
+  const saved = localStorage.getItem('talk-voice') || '';
+  let kokoro: { id: string; label: string; lang: string }[] = [];
+  try { kokoro = (await (await fetch(`${SERVER}/tts/voices`)).json()).voices; } catch { /* server offline */ }
   const fill = () => {
-    const voices = speechSynthesis.getVoices();
-    if (!voices.length) return;
-    const saved = localStorage.getItem('talk-voice') || '';
-    sel.innerHTML = '<option value="">System voice (auto)</option>' + voices
-      .filter(v => /^(en|hi)/i.test(v.lang))
-      .map(v => `<option value="${v.name}" ${v.name === saved ? 'selected' : ''}>${v.name} (${v.lang})</option>`)
-      .join('');
+    if (!document.contains(sel)) return;
+    const sys = speechSynthesis.getVoices().filter(v => /^(en|hi)/i.test(v.lang));
+    sel.innerHTML =
+      '<option value="">System voice (auto)</option>' +
+      (kokoro.length ? `<optgroup label="Kokoro — local neural (~90 MB once)">${kokoro
+        .map(v => `<option value="k:${v.id}" ${`k:${v.id}` === saved ? 'selected' : ''}>${v.label}</option>`).join('')}</optgroup>` : '') +
+      (sys.length ? `<optgroup label="System">${sys
+        .map(v => `<option value="s:${v.name}" ${`s:${v.name}` === saved ? 'selected' : ''}>${v.name} (${v.lang})</option>`).join('')}</optgroup>` : '');
   };
   fill();
   speechSynthesis.onvoiceschanged = fill;
-  sel.onchange = () => localStorage.setItem('talk-voice', sel.value);
+  sel.onchange = () => {
+    localStorage.setItem('talk-voice', sel.value);
+    if (sel.value.startsWith('k:')) toast('Kokoro voice — first use downloads the model once, then instant.');
+  };
 }
 
+let talkAudio: HTMLAudioElement | null = null;
+
 function talkSpeak(text: string, partOfTurn: boolean) {
+  const chosen = localStorage.getItem('talk-voice') || '';
+  const isHindi = /[ऀ-ॿ]/.test(text);
+  // Kokoro is English-only — Devanagari replies route to the system Hindi voice
+  if (chosen.startsWith('k:') && !isHindi) { void kokoroSpeak(text, chosen.slice(2), partOfTurn); return; }
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
-  const chosen = localStorage.getItem('talk-voice');
-  if (chosen) {
-    const v = speechSynthesis.getVoices().find(x => x.name === chosen);
+  if (chosen.startsWith('s:')) {
+    const v = speechSynthesis.getVoices().find(x => x.name === chosen.slice(2));
     if (v) u.voice = v;
   } else if (/[\u0900-\u097F]/.test(text)) {
     u.lang = 'hi-IN'; // Devanagari → Hindi system voice
@@ -924,8 +936,41 @@ function talkSpeak(text: string, partOfTurn: boolean) {
   speechSynthesis.speak(u);
 }
 
+async function kokoroSpeak(text: string, voice: string, partOfTurn: boolean) {
+  stopTalkAudio();
+  talkStatus('voicing\u2026');
+  try {
+    const r = await fetch(`${SERVER}/tts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice }),
+    });
+    if (!r.ok) {
+      const data: any = await r.json().catch(() => ({}));
+      toast(`Kokoro failed (${data.error ?? r.status}) — using system voice`);
+      localStorage.setItem('talk-voice', '');
+      talkSpeak(text, partOfTurn);
+      return;
+    }
+    const url = URL.createObjectURL(await r.blob());
+    talkAudio = new Audio(url);
+    talkAudio.onplay = () => talkSetPhase('speaking', 'speaking — Esc or Space interrupts');
+    talkAudio.onended = () => {
+      URL.revokeObjectURL(url);
+      talkAudio = null;
+      if (talk.phase === 'speaking') talkSetPhase('idle', 'hold Space and speak, or type');
+    };
+    void talkAudio.play();
+  } catch {
+    talkSetPhase('idle', 'local server unreachable');
+  }
+}
+
+function stopTalkAudio() {
+  if (talkAudio) { talkAudio.pause(); talkAudio = null; }
+}
+
 function talkInterrupt() {
   speechSynthesis.cancel();
+  stopTalkAudio();
   talk.chunks = [];
   talkSetPhase('idle', 'hold Space and speak, or type');
 }

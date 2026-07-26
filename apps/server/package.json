@@ -10,10 +10,12 @@
   "dependencies": {
     "@assemble/actions": "workspace:*",
     "@assemble/core": "workspace:*",
-    "@assemble/integration-slack": "workspace:*",
     "@assemble/integration-linear": "workspace:*",
+    "@assemble/integration-slack": "workspace:*",
     "@assemble/llm": "workspace:*",
     "@assemble/stt": "workspace:*",
-    "hono": "^4.0.0"
+    "@huggingface/transformers": "3.8.1",
+    "hono": "^4.0.0",
+    "kokoro-js": "^1.2.1"
   }
 }

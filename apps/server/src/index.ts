@@ -19,6 +19,7 @@ import { existsSync, rmSync, statSync } from 'node:fs';
 import { notifyMac } from './notify';
 import { Recorder } from './recorder';
 import { LiveTranscriber } from './live-stt';
+import { KOKORO_VOICES, kokoroLoaded, synthWav } from './tts';
 import { LlmRuntime } from './llm-runtime';
 import {
   toolStatus, runSetupStep, SETUP_STEPS, AUDIOTAP_BIN, KEYWATCH_BIN,
@@ -397,6 +398,21 @@ async function talkTurn(chatId: number, userText: string): Promise<string> {
   addTalkMessage(db, chatId, 'assistant', reply);
   return reply;
 }
+
+// Local neural TTS (Kokoro) — model downloads once on first use.
+app.get('/tts/voices', c => c.json({ voices: KOKORO_VOICES, ready: kokoroLoaded() }));
+
+app.post('/tts', async c => {
+  const { text, voice } = await c.req.json<{ text?: string; voice?: string }>();
+  if (!text?.trim()) return c.json({ error: 'text required' }, 400);
+  if (!KOKORO_VOICES.some(v => v.id === voice)) return c.json({ error: 'unknown voice' }, 400);
+  try {
+    const wav = await synthWav(text.trim(), voice!, line => broadcast({ kind: 'setup-progress', step: 'kokoro', line }));
+    return c.body(wav.buffer as ArrayBuffer, 200, { 'Content-Type': 'audio/wav' });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
 
 // One-shot quick answer for the floating panel — nothing persisted.
 app.post('/talk/quick', async c => {
