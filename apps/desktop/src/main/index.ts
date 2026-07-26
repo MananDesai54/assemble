@@ -32,7 +32,11 @@ async function ensureServer() {
   serverProc = spawn(bun, ['run', 'apps/server/src/index.ts'], {
     cwd: repoRoot, stdio: 'ignore',
   });
-  serverProc.on('exit', () => { serverProc = null; });
+  // watchdog: the app owns the server — if it dies mid-session, bring it back
+  serverProc.on('exit', () => {
+    serverProc = null;
+    if (!quitting) setTimeout(() => { void ensureServer(); }, 2000);
+  });
 }
 
 function createWindow() {
