@@ -24,6 +24,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - name: Sync version from tag
+        # electron-builder reads package.json version for artifact names and
+        # the target release — inject it from the tag (build-time only, never
+        # committed) so the tag is the single source of truth.
+        working-directory: apps/desktop
+        run: npm pkg set version="${GITHUB_REF_NAME#v}"
       - name: Build renderer + main
         working-directory: apps/desktop
         run: node build.mjs
