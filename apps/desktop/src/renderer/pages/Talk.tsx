@@ -29,8 +29,8 @@ function useOrb(orbRef: React.RefObject<HTMLCanvasElement | null>, waveRef: Reac
       const W = canvas.width, H = canvas.height, cx = W / 2, cy = H / 2;
       ctx.clearRect(0, 0, W, H);
       const s = getComputedStyle(document.documentElement);
-      const acc = s.getPropertyValue('--acc').trim() || '#a78bfa';
-      const acc2 = s.getPropertyValue('--acc-2').trim() || '#c084fc';
+      const acc = s.getPropertyValue('--acc').trim() || '#e8e8ec';
+      const acc2 = s.getPropertyValue('--acc-2').trim() || '#9a9aa2';
       const base = 26;
       for (let ring = 3; ring >= 1; ring--) {
         ctx.beginPath();

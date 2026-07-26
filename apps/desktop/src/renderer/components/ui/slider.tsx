@@ -11,7 +11,7 @@ function Slider({ className, ...props }: React.ComponentProps<typeof SliderPrimi
       <SliderPrimitive.Track className="relative h-1.5 w-full grow overflow-hidden rounded-full bg-panel-2">
         <SliderPrimitive.Range className="absolute h-full bg-grad" />
       </SliderPrimitive.Track>
-      <SliderPrimitive.Thumb className="block size-4 cursor-pointer rounded-full border border-line bg-white shadow outline-none focus-visible:ring-2 focus-visible:ring-acc" />
+      <SliderPrimitive.Thumb className="block size-4 cursor-pointer rounded-full border border-line bg-ink shadow outline-none focus-visible:ring-2 focus-visible:ring-acc" />
     </SliderPrimitive.Root>
   );
 }

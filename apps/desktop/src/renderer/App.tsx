@@ -14,6 +14,7 @@ import { WorkPage } from './pages/Work';
 import { ActivityPage } from './pages/Activity';
 import { SettingsPage } from './pages/Settings';
 import { Toast } from './components/Toast';
+import { LogoMark } from './components/Logo';
 import { ConsentDialog } from './components/ConsentDialog';
 import { Switch } from './components/ui/switch';
 import {
@@ -48,32 +49,33 @@ function Topbar() {
   const s = statusInfo();
   const dark = document.documentElement.dataset.theme === 'dark';
   return (
-    <header className="glass relative z-10 flex items-center gap-3.5 border-b border-line px-5 py-3">
-      <span className="text-grad text-sm font-bold lowercase tracking-[0.30em]">assemble</span>
-      <button
-        className="flex cursor-pointer items-center gap-1.5 text-xs text-dim"
-        onClick={() => { if (!app.engine && app.mode === 'app' && app.config.armed) { app.consentOpen = true; emit(); } }}
-      >
-        <span className={cn(
-          'size-2 rounded-full bg-dim',
-          s.state === 'live' && 'animate-[breathe_2.4s_ease-in-out_infinite] bg-ok shadow-[0_0_8px_var(--ok)]',
-          s.state === 'paused' && 'bg-acc',
-          s.state === 'error' && 'bg-danger',
-        )} />
-        <span>{s.text}</span>
-      </button>
+    <header className="glass relative z-10 flex items-center gap-3 border-b border-line px-5 py-2.5">
+      <LogoMark className="size-6 rounded-md" />
+      <span className="text-sm font-bold lowercase tracking-[0.30em] text-ink">assemble</span>
       {app.recording && <span className="animate-[breathe_1.2s_ease-in-out_infinite] text-xs font-bold tracking-[0.08em] text-danger">● REC</span>}
-      <div className="ml-auto flex items-center gap-3.5">
+      <div className="ml-auto flex items-center gap-3">
         <button className="cursor-pointer rounded-lg border border-transparent px-2 py-1 text-[15px] text-dim hover:border-line hover:text-ink"
           title="Switch theme" onClick={toggleTheme}>
           {dark ? '☾' : '☀'}
         </button>
-        {app.mode === 'app' && (
-          <label className="flex cursor-pointer select-none items-center gap-2 text-xs text-dim">
+        {/* status + listening toggle live together in one control */}
+        <div className="flex items-center gap-2.5 rounded-full border border-line bg-panel/60 py-1.5 pl-3 pr-2">
+          <button
+            className="flex cursor-pointer items-center gap-1.5 text-xs text-dim"
+            onClick={() => { if (!app.engine && app.mode === 'app' && app.config.armed) { app.consentOpen = true; emit(); } }}
+          >
+            <span className={cn(
+              'size-2 rounded-full bg-dim',
+              s.state === 'live' && 'animate-[breathe_2.4s_ease-in-out_infinite] bg-ok shadow-[0_0_8px_var(--ok)]',
+              s.state === 'paused' && 'bg-acc',
+              s.state === 'error' && 'bg-danger',
+            )} />
+            <span>{s.text}</span>
+          </button>
+          {app.mode === 'app' && (
             <Switch checked={!!app.config?.armed} onCheckedChange={v => void window.assemble.setArmed(v)} />
-            <span>Listening</span>
-          </label>
-        )}
+          )}
+        </div>
       </div>
     </header>
   );

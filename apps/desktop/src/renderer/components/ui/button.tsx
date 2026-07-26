@@ -7,7 +7,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'bg-grad text-white font-semibold hover:-translate-y-px hover:shadow-glow',
+        default: 'bg-grad text-acc-fg font-semibold hover:-translate-y-px hover:shadow-glow',
         secondary: 'glass border border-line hover:bg-panel-2 hover:border-acc/40',
         ghost: 'border border-transparent text-dim hover:border-line hover:text-ink',
         danger: 'glass border border-danger text-danger hover:bg-danger/10',

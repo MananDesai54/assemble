@@ -142,7 +142,7 @@ function StepReady() {
         initial={{ scale: 0.4, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         transition={{ type: 'spring', duration: 0.6, bounce: 0.45 }}
-        className="bg-grad grid size-[84px] place-items-center rounded-full text-[40px] text-white shadow-[0_0_0_10px_var(--acc-soft),0_0_40px_var(--glow)]"
+        className="bg-grad grid size-[84px] place-items-center rounded-full text-[40px] text-acc-fg shadow-[0_0_0_10px_var(--acc-soft),0_0_40px_var(--glow)]"
       >
         ✓
       </motion.div>
@@ -178,7 +178,7 @@ export function Setup() {
                 'grid size-[30px] place-items-center rounded-full border-[1.5px] border-line text-[13px] not-italic text-dim transition-all',
                 'glass',
                 i === app.setupStep && 'border-acc text-acc shadow-[0_0_0_4px_var(--acc-soft),0_0_16px_var(--glow)]',
-                i < app.setupStep && 'bg-grad border-transparent text-white',
+                i < app.setupStep && 'bg-grad border-transparent text-acc-fg',
               )}>
                 {i < app.setupStep ? '✓' : i + 1}
               </i>
