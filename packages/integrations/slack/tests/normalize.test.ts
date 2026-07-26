@@ -16,6 +16,7 @@ describe('normalizeHistoryMessage', () => {
       threadTs: null,
       team: 'T1',
       botName: null,
+      botId: null,
     });
   });
 
@@ -48,7 +49,7 @@ describe('normalizeEvent (push transport)', () => {
     const m = normalizeEvent({ type: 'message', ts: '5.0', channel: 'C9', channel_type: 'channel', user: 'U3', text: 'yo' }, 'T1');
     expect(m).toEqual({
       slackTs: '5.0', channel: 'C9', channelType: 'channel', user: 'U3',
-      text: 'yo', threadTs: null, team: 'T1', botName: null,
+      text: 'yo', threadTs: null, team: 'T1', botName: null, botId: null,
     });
   });
 
@@ -69,7 +70,8 @@ describe('bot/webhook messages', () => {
     expect(ev?.text).toBe('Hello, World!');
     expect(ev?.botName).toBe('automations');
     expect(ev?.user).toBeNull();
-    const h = normalizeHistoryMessage({ type: 'message', subtype: 'bot_message', ts: '8.0', text: 'ping' }, 'C9', 'channel');
-    expect(h?.botName).toBe('bot');
+    const h = normalizeHistoryMessage({ type: 'message', subtype: 'bot_message', ts: '8.0', text: 'ping', bot_id: 'B1' }, 'C9', 'channel');
+    expect(h?.botName).toBeNull();
+    expect(h?.botId).toBe('B1');
   });
 });

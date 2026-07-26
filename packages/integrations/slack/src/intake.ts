@@ -11,6 +11,8 @@ export interface NormalizedMessage {
   team: string | null;
   /** Display name for bot/webhook posts (no user id to resolve). */
   botName?: string | null;
+  /** Bot id (B…) for bot posts without a username — resolvable via bots.info. */
+  botId?: string | null;
 }
 
 // No subtype filtering — the user wants every message they receive. Anything
@@ -42,7 +44,8 @@ export function normalizeHistoryMessage(
     text: String(msg.text),
     threadTs: msg.thread_ts ?? null,
     team: team ?? null,
-    botName: msg.username ?? (msg.subtype === 'bot_message' ? 'bot' : null),
+    botName: msg.username ?? null,
+    botId: msg.bot_id ?? null,
   };
 }
 
@@ -64,7 +67,8 @@ export function normalizeEvent(event: any, team?: string | null): NormalizedMess
     text: String(event.text),
     threadTs: event.thread_ts ?? null,
     team: team ?? null,
-    botName: event.username ?? (event.subtype === 'bot_message' ? 'bot' : null),
+    botName: event.username ?? null,
+    botId: event.bot_id ?? null,
   };
 }
 
@@ -177,6 +181,21 @@ export async function startSlack({
     }
     return channelNames.get(id) ?? null;
   }
+  const botNames = new Map<string, string | null>();
+  async function senderName(m: NormalizedMessage): Promise<string | null> {
+    if (m.user) return userName(m.user);
+    if (m.botName) return m.botName;
+    if (m.botId) {
+      if (!botNames.has(m.botId)) {
+        try {
+          const r: any = await web.bots.info({ bot: m.botId });
+          botNames.set(m.botId, r.bot?.name ?? null);
+        } catch { botNames.set(m.botId, null); }
+      }
+      return botNames.get(m.botId) ?? 'bot';
+    }
+    return null;
+  }
 
   /* ---- push transport: Socket Mode, like slack-receiver's webhook but local ---- */
   if (appToken) {
@@ -190,7 +209,7 @@ export async function startSlack({
       if (!norm) return;
       onMessage({
         ...norm,
-        userName: norm.user ? await userName(norm.user) : norm.botName ?? null,
+        userName: await senderName(norm),
         channelName: norm.channelType === 'im' ? 'DM' : await channelName(norm.channel),
         isSelf: norm.user === self,
       });
@@ -260,7 +279,7 @@ export async function startSlack({
       lastActivity.set(c.id, Date.now());
       onMessage({
         ...norm,
-        userName: norm.user ? await userName(norm.user) : norm.botName ?? null,
+        userName: await senderName(norm),
         channelName: c.type === 'im' ? 'DM' : c.name,
         isSelf: norm.user === self,
       });
