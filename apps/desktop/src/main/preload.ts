@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld('assemble', {
   quickOpenInApp: (text: string) => ipcRenderer.send('quick:open-in-app', text),
   quickHide: () => ipcRenderer.send('quick:hide'),
   quickToggle: () => ipcRenderer.send('quick:toggle'),
+  quickResize: (h: number) => ipcRenderer.send('quick:resize', h),
   onOpenTalk: (cb: (text: string) => void) => ipcRenderer.on('open-talk', (_e, text) => cb(text)),
 });

@@ -1,10 +1,11 @@
 // Quick-ask floating panel: Enter = answer inline, Cmd+Enter = open the main
 // app on a fresh Talk chat seeded with the question. Esc hides.
 
-// The full preload API is typed in renderer.ts — this window only needs two calls.
+// The full preload API is typed in renderer.ts — this window only needs a few calls.
 const assemble = (window as any).assemble as {
   quickOpenInApp: (text: string) => void;
   quickHide: () => void;
+  quickResize: (h: number) => void;
 };
 
 const SERVER = 'http://127.0.0.1:4817';
@@ -52,5 +53,9 @@ q.addEventListener('keydown', e => {
 
 // fresh panel every time it's summoned
 window.addEventListener('focus', () => q.focus());
+
+// window hugs the panel — no transparent dead zone below (its shadow drew a ghost border)
+const panel = document.querySelector('.panel') as HTMLElement;
+new ResizeObserver(() => assemble.quickResize(panel.offsetHeight + 16)).observe(panel);
 
 export {};

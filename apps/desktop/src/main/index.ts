@@ -31,10 +31,10 @@ function toggleQuickPanel() {
     return;
   }
   quickWin = new BrowserWindow({
-    width: 620, height: 320,
+    width: 620, height: 120,
     frame: false, transparent: true, resizable: false,
     alwaysOnTop: true, skipTaskbar: true, show: false,
-    hasShadow: true,
+    hasShadow: false, // transparent window — the panel carries its own CSS shadow
     webPreferences: { preload: join(__dirname, 'preload.cjs') },
   });
   quickWin.loadFile(join(__dirname, 'quick.html'));
@@ -109,6 +109,9 @@ app.whenReady().then(() => {
 
   ipcMain.on('quick:hide', () => quickWin?.hide());
   ipcMain.on('quick:toggle', toggleQuickPanel); // Fn+Space arrives via keywatch → server WS → renderer
+  ipcMain.on('quick:resize', (_e, h: number) => {
+    if (quickWin && !quickWin.isDestroyed()) quickWin.setContentSize(620, Math.min(460, Math.max(110, Math.round(h))));
+  });
   ipcMain.on('quick:open-in-app', (_e, text: string) => {
     quickWin?.hide();
     win.show();
