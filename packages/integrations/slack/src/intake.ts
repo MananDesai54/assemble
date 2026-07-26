@@ -20,21 +20,31 @@ export interface NormalizedMessage {
 // no content of their own, so they never create rows.
 
 /**
- * Alert-style bot posts (Grafana, CI, …) carry their content in attachments
- * or blocks with an empty top-level text — pull it out of wherever it lives.
+ * Slack messages carry content in many shapes — plain text, attachments
+ * (Grafana/CI alerts), blocks (section/header/context), file uploads with or
+ * without a caption. Pull displayable text out of all of them.
  */
 export function extractText(msg: any): string {
-  if (typeof msg?.text === 'string' && msg.text.trim()) return String(msg.text);
   const parts: string[] = [];
-  for (const a of msg?.attachments ?? []) {
-    const line = [a?.title, a?.text ?? a?.fallback].filter(Boolean).join(' — ');
-    if (line) parts.push(line);
-  }
-  if (!parts.length) {
-    for (const b of msg?.blocks ?? []) {
-      const t = b?.text?.text;
-      if (t) parts.push(String(t));
+  if (typeof msg?.text === 'string' && msg.text.trim()) {
+    parts.push(String(msg.text));
+  } else {
+    for (const a of msg?.attachments ?? []) {
+      const line = [a?.title, a?.text ?? a?.fallback].filter(Boolean).join(' — ');
+      if (line) parts.push(line);
     }
+    if (!parts.length) {
+      for (const b of msg?.blocks ?? []) {
+        if (b?.text?.text) parts.push(String(b.text.text));           // section, header
+        for (const el of b?.elements ?? []) {                          // context
+          if (el?.text && typeof el.text === 'string') parts.push(el.text);
+        }
+      }
+    }
+  }
+  // file uploads always noted — with a caption they add to it, alone they ARE the message
+  for (const f of msg?.files ?? []) {
+    parts.push(`[file] ${f?.title || f?.name || 'file'}`);
   }
   return parts.join('\n');
 }

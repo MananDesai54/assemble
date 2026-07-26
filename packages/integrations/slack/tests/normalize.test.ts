@@ -95,3 +95,26 @@ describe('attachment/block messages (Grafana-style alerts)', () => {
     expect(normalizeEvent({ type: 'message', ts: '11.0', channel: 'C9', text: '' })).toBeNull();
   });
 });
+
+describe('file and misc message shapes', () => {
+  it('file-only message becomes [file] lines', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    const m = normalizeEvent({
+      type: 'message', ts: '12.0', channel: 'C9', user: 'U5', text: '',
+      files: [{ name: 'certificate-9qusdj.pdf' }, { title: 'report Q3' }],
+    });
+    expect(m?.text).toBe('[file] certificate-9qusdj.pdf\n[file] report Q3');
+  });
+
+  it('file with caption keeps both', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    const m = normalizeEvent({ type: 'message', ts: '13.0', channel: 'C9', user: 'U5', text: 'here are the certs', files: [{ name: 'a.pdf' }] });
+    expect(m?.text).toBe('here are the certs\n[file] a.pdf');
+  });
+
+  it('context block text extracted', async () => {
+    const { normalizeEvent } = await import('../src/intake');
+    const m = normalizeEvent({ type: 'message', ts: '14.0', channel: 'C9', text: '', blocks: [{ type: 'context', elements: [{ type: 'mrkdwn', text: 'deployed by ci' }] }] });
+    expect(m?.text).toBe('deployed by ci');
+  });
+});
