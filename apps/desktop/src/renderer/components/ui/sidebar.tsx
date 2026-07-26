@@ -58,7 +58,7 @@ export function Sidebar({ className, children, ...props }: React.ComponentProps<
       data-state={state}
       data-collapsible={state === 'collapsed' ? 'icon' : ''}
       className={cn(
-        'group/sidebar flex shrink-0 flex-col bg-transparent transition-[width] duration-200 ease-linear',
+        'glass group/sidebar flex shrink-0 flex-col transition-[width] duration-200 ease-linear',
         'w-[var(--sidebar-width)] data-[collapsible=icon]:w-[var(--sidebar-width-icon)]',
         className,
       )}
@@ -148,15 +148,5 @@ export function SidebarTrigger({ className, ...props }: React.ComponentProps<typ
 }
 
 export function SidebarInset({ className, ...props }: React.ComponentProps<'main'>) {
-  // Linear-style separation: content floats as an inset card over the window chrome
-  return (
-    <main
-      className={cn(
-        'mb-2 mr-2 mt-0 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-line',
-        'bg-[color-mix(in_srgb,var(--panel)_88%,transparent)] backdrop-blur-[14px] shadow-[0_2px_16px_var(--shadow)]',
-        className,
-      )}
-      {...props}
-    />
-  );
+  return <main className={cn('flex min-h-0 min-w-0 flex-1 flex-col', className)} {...props} />;
 }

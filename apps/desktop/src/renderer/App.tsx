@@ -19,7 +19,7 @@ import { ConsentDialog } from './components/ConsentDialog';
 import { Switch } from './components/ui/switch';
 import {
   Sidebar, SidebarProvider, SidebarContent, SidebarFooter, SidebarGroup, SidebarGroupLabel,
-  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarSeparator, SidebarTrigger, SidebarInset,
+  SidebarMenu, SidebarMenuItem, SidebarMenuButton, SidebarTrigger, SidebarInset,
 } from './components/ui/sidebar';
 import { cn } from './lib/utils';
 
@@ -49,7 +49,7 @@ function Topbar() {
   const s = statusInfo();
   const dark = document.documentElement.dataset.theme === 'dark';
   return (
-    <header className="relative z-10 flex items-center gap-3 px-4 py-2">
+    <header className="glass relative z-10 flex items-center gap-3 px-4 py-2">
       <LogoMark className="size-9 rounded-[10px]" />
       {app.recording && <span className="animate-[breathe_1.2s_ease-in-out_infinite] text-xs font-bold tracking-[0.08em] text-danger">● REC</span>}
       <div className="ml-auto flex items-center gap-3">
@@ -106,7 +106,6 @@ function Shell() {
           </SidebarGroup>
         </SidebarContent>
         <SidebarFooter>
-          <SidebarSeparator className="mx-0" />
           <SidebarTrigger className="self-start" />
         </SidebarFooter>
       </Sidebar>
