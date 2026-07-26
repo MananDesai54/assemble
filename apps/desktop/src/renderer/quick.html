@@ -1,0 +1,51 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src http://127.0.0.1:4817; style-src 'unsafe-inline'" />
+<style>
+  :root { --bg: #17140f; --ink: #efe9dd; --dim: #9b9384; --line: #3a3428; --amber: #d9a441; }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f7f4ee; --ink: #2a251d; --dim: #7d766a; --line: #ddd6c8; --amber: #b8862f; }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: transparent; }
+  body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, sans-serif; color: var(--ink); padding: 8px; }
+  .panel {
+    background: var(--bg); border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.45); padding: 14px; display: flex;
+    flex-direction: column; gap: 10px;
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); flex-shrink: 0; }
+  .dot.busy { animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 50% { transform: scale(1.6); opacity: 0.5; } }
+  input {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--ink); font: 16px/1.4 inherit;
+  }
+  input::placeholder { color: var(--dim); }
+  .hint { color: var(--dim); font-size: 12px; display: flex; justify-content: space-between; }
+  kbd { background: color-mix(in srgb, var(--ink) 8%, transparent); border-radius: 4px; padding: 1px 5px; font: 11px ui-monospace, monospace; }
+  #answer {
+    display: none; white-space: pre-wrap; max-height: 190px; overflow-y: auto;
+    border-top: 1px solid var(--line); padding-top: 10px; color: var(--ink);
+  }
+  #answer.on { display: block; }
+</style>
+</head>
+<body>
+  <div class="panel">
+    <div class="row">
+      <span class="dot" id="dot"></span>
+      <input id="q" placeholder="Ask assemble anything…" autofocus />
+    </div>
+    <div id="answer"></div>
+    <div class="hint">
+      <span><kbd>↵</kbd> quick answer · <kbd>⌘↵</kbd> continue in app</span>
+      <span><kbd>esc</kbd> close</span>
+    </div>
+  </div>
+  <script type="module" src="./quick.js"></script>
+</body>
+</html>

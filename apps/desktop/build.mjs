@@ -29,6 +29,15 @@ await build({
   outfile: 'dist/renderer.js',
 });
 
+await build({
+  entryPoints: ['src/renderer/quick.ts'],
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  outfile: 'dist/quick.js',
+});
+
 cpSync('src/renderer/index.html', 'dist/index.html');
+cpSync('src/renderer/quick.html', 'dist/quick.html');
 cpSync('src/renderer/styles.css', 'dist/styles.css');
 console.log('desktop build done');

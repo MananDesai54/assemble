@@ -10,4 +10,8 @@ contextBridge.exposeInMainWorld('assemble', {
   whistleStep: (dir: number) => ipcRenderer.send('whistle-step', dir),
   onArmedChanged: (cb: (v: boolean) => void) => ipcRenderer.on('armed-changed', (_e, v) => cb(v)),
   onVoiceToggle: (cb: () => void) => ipcRenderer.on('voice-toggle', () => cb()),
+  // quick-ask floating panel
+  quickOpenInApp: (text: string) => ipcRenderer.send('quick:open-in-app', text),
+  quickHide: () => ipcRenderer.send('quick:hide'),
+  onOpenTalk: (cb: (text: string) => void) => ipcRenderer.on('open-talk', (_e, text) => cb(text)),
 });

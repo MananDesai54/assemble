@@ -18,6 +18,9 @@ declare global {
       whistleStep: (dir: number) => void;
       onArmedChanged: (cb: (v: boolean) => void) => void;
       onVoiceToggle: (cb: () => void) => void;
+      quickOpenInApp: (text: string) => void;
+      quickHide: () => void;
+      onOpenTalk: (cb: (text: string) => void) => void;
     };
   }
 }
@@ -103,6 +106,13 @@ async function init() {
     setStatus();
   });
   window.assemble.onVoiceToggle(() => voiceToggle());
+  // quick panel → "continue in app": fresh Talk chat seeded with the question
+  window.assemble.onOpenTalk(async text => {
+    if (state.mode !== 'app') return;
+    setPage('talk');
+    await newTalkChat();
+    void talkSendText(text);
+  });
 
   // Sensors never auto-start: mic begins in the setup flow (user-initiated) or
   // after the consent prompt on the app screen.
@@ -856,11 +866,11 @@ async function talkSend() {
   }
 }
 
-async function talkSendText() {
+async function talkSendText(preset?: string) {
   const input = $('#talk-input') as HTMLInputElement | null;
-  const text = input?.value.trim();
+  const text = preset ?? input?.value.trim();
   if (!text || !talk.chatId || talk.phase === 'thinking') return;
-  input!.value = '';
+  if (input && !preset) input.value = '';
   talkBubble('user', text);
   talkSetPhase('thinking', 'thinking\u2026');
   try {

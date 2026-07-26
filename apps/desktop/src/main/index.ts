@@ -15,10 +15,32 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 app.setName('assemble');
 app.setPath('userData', join(app.getPath('appData'), 'assemble'));
 let win: BrowserWindow;
+let quickWin: BrowserWindow | null = null;
 let trayHandle: ReturnType<typeof createTray>;
 let store: ConfigStore;
 let quitting = false;
 let serverProc: ChildProcess | null = null;
+
+// Floating quick-ask panel (Option+Space) — ChatGPT/Claude-style spotlight.
+function toggleQuickPanel() {
+  if (quickWin && !quickWin.isDestroyed()) {
+    if (quickWin.isVisible()) { quickWin.hide(); return; }
+    quickWin.center();
+    quickWin.show();
+    quickWin.focus();
+    return;
+  }
+  quickWin = new BrowserWindow({
+    width: 620, height: 320,
+    frame: false, transparent: true, resizable: false,
+    alwaysOnTop: true, skipTaskbar: true, show: false,
+    hasShadow: true,
+    webPreferences: { preload: join(__dirname, 'preload.cjs') },
+  });
+  quickWin.loadFile(join(__dirname, 'quick.html'));
+  quickWin.on('blur', () => quickWin?.hide());
+  quickWin.once('ready-to-show', () => { quickWin!.center(); quickWin!.show(); });
+}
 
 // The desktop app owns the local daemon: start it if nothing answers on :4817.
 async function ensureServer() {
@@ -80,6 +102,17 @@ app.whenReady().then(() => {
   // push-to-talk hotkey, works even when the window is hidden
   globalShortcut.register('Control+Shift+Space', () => {
     win.webContents.send('voice-toggle');
+  });
+
+  // quick-ask panel, from anywhere
+  globalShortcut.register('Alt+Space', toggleQuickPanel);
+
+  ipcMain.on('quick:hide', () => quickWin?.hide());
+  ipcMain.on('quick:open-in-app', (_e, text: string) => {
+    quickWin?.hide();
+    win.show();
+    win.focus();
+    win.webContents.send('open-talk', text);
   });
 
   ipcMain.handle('config:get', () => store.get());

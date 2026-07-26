@@ -398,6 +398,19 @@ async function talkTurn(chatId: number, userText: string): Promise<string> {
   return reply;
 }
 
+// One-shot quick answer for the floating panel — nothing persisted.
+app.post('/talk/quick', async c => {
+  if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
+  const { text } = await c.req.json<{ text?: string }>();
+  if (!text?.trim()) return c.json({ error: 'text required' }, 400);
+  try {
+    const reply = await talkReply(llm, [{ role: 'user', content: text.trim() }]);
+    return c.json({ reply });
+  } catch (err) {
+    return c.json({ error: (err as Error).message }, 500);
+  }
+});
+
 app.post('/talk/chats/:id/message', async c => {
   if (!(await llmReady())) return c.json({ error: 'local AI is off — open Setup' }, 503);
   const { text } = await c.req.json<{ text?: string }>();
