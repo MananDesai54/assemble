@@ -43,17 +43,21 @@ function toggleQuickPanel() {
 }
 
 // The desktop app owns the local daemon: start it if nothing answers on :4817.
+// Dev runs it from the repo source; packaged builds ship a bundled server.js
+// (+ its ML node_modules and the Swift helper sources) in extraResources.
 async function ensureServer() {
   try {
     await fetch('http://127.0.0.1:4817/health', { signal: AbortSignal.timeout(1000) });
     return; // already running (user-managed or previous instance)
   } catch { /* not running — spawn */ }
-  const repoRoot = join(__dirname, '..', '..', '..'); // apps/desktop/dist → repo root
-  const bunCandidates = [join(homedir(), '.bun/bin/bun'), '/opt/homebrew/bin/bun', 'bun'];
+  const bunCandidates = [join(homedir(), '.bun/bin/bun'), '/opt/homebrew/bin/bun', '/usr/local/bin/bun', 'bun'];
   const bun = bunCandidates.find(p => p === 'bun' || existsSync(p)) ?? 'bun';
-  serverProc = spawn(bun, ['run', 'apps/server/src/index.ts'], {
-    cwd: repoRoot, stdio: 'ignore',
-  });
+  const packaged = app.isPackaged;
+  const cwd = packaged
+    ? join(process.resourcesPath, 'server')
+    : join(__dirname, '..', '..', '..'); // apps/desktop/dist → repo root
+  const entry = packaged ? 'server.js' : 'apps/server/src/index.ts';
+  serverProc = spawn(bun, ['run', entry], { cwd, stdio: 'ignore' });
   // watchdog: the app owns the server — if it dies mid-session, bring it back
   serverProc.on('exit', () => {
     serverProc = null;

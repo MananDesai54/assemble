@@ -1,0 +1,37 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14 # apple silicon
+            arch: arm64
+          - os: macos-13 # intel
+            arch: x64
+          - os: ubuntu-latest
+            arch: x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - name: Build renderer + main
+        working-directory: apps/desktop
+        run: node build.mjs
+      - name: Stage server (bundled js + per-arch ML node_modules)
+        working-directory: apps/desktop
+        run: node scripts/stage-server.mjs
+      - name: Package + publish
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bunx electron-builder --publish always --${{ matrix.arch }}

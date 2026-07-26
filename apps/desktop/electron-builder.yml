@@ -1,0 +1,30 @@
+appId: com.manandesai.assemble
+productName: assemble
+directories:
+  buildResources: build
+  output: release
+files:
+  - dist/**
+  - package.json
+extraResources:
+  # bundled local daemon: server.js + ML node_modules + swift helper sources
+  - from: stage/server
+    to: server
+asar: true
+npmRebuild: false
+afterPack: scripts/after-pack.mjs
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+publish:
+  provider: github
+  owner: MananDesai54
+  repo: assemble
+mac:
+  category: public.app-category.productivity
+  identity: null # unsigned — installer strips the quarantine bit
+  target:
+    - zip
+    - dmg
+linux:
+  category: Utility
+  target:
+    - AppImage

@@ -6,3 +6,5 @@ models/
 data/
 native/audiotap/audiotap
 native/keywatch/keywatch
+stage/
+release/
