@@ -30,21 +30,8 @@ export const KOKORO_VOICES: KokoroVoice[] = [
 
 let ttsPromise: Promise<KokoroTTS> | null = null;
 let loaded = false;
-let lastUse = 0;
 
 export const kokoroLoaded = () => loaded;
-export const kokoroLastUse = () => lastUse;
-
-// free the ONNX sessions (~300 MB) when the voice has been idle a while —
-// next synth just reloads from the local model cache
-export async function unloadKokoro(): Promise<void> {
-  if (!ttsPromise) return;
-  const p = ttsPromise;
-  ttsPromise = null;
-  loaded = false;
-  try { await (await p).model?.dispose?.(); }
-  catch { /* load had already failed — nothing held */ }
-}
 
 export function getKokoro(onProgress?: (line: string) => void): Promise<KokoroTTS> {
   if (!ttsPromise) {
@@ -74,7 +61,6 @@ function encodeWavPcm16(samples: Float32Array, rate: number): Uint8Array {
 }
 
 export async function synthWav(text: string, voice: string, onProgress?: (line: string) => void): Promise<Uint8Array> {
-  lastUse = Date.now();
   const tts = await getKokoro(onProgress);
   const audio = await tts.generate(text, { voice: voice as never });
   return encodeWavPcm16(audio.audio as Float32Array, audio.sampling_rate);
