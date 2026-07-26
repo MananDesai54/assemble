@@ -184,7 +184,7 @@ app.post('/setup/run', async c => {
 
 app.post('/reset', async c => {
   if (recorder.active) { try { await recorder.stop(); } catch { /* best effort */ } }
-  db.exec(`DELETE FROM messages; DELETE FROM recordings; DELETE FROM agent_sessions; DELETE FROM kv;`);
+  db.exec(`DELETE FROM messages; DELETE FROM recordings; DELETE FROM agent_sessions; DELETE FROM kv; DELETE FROM talk_messages; DELETE FROM talk_chats;`);
   for (const dir of [RECORDINGS_DIR, VOICE_DIR]) rmSync(dir, { recursive: true, force: true });
   await stopAll(); // tokens gone → intake stops
   broadcast({ kind: 'reset' });

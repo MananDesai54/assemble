@@ -1208,9 +1208,14 @@ function renderSettingsTab() {
         <label>Sensitivity <span class="hint">left = softer taps register</span></label>
         <input type="range" id="sensitivity" min="3" max="15" step="0.5" />
       </div>
+      <div class="setting-row">
+        <label>Onboarding</label>
+        <span class="hint">Walk the setup wizard again — nothing is deleted; every step re-checks what's installed and connected.</span>
+        <button class="secondary" id="redo-onboarding">Revisit onboarding</button>
+      </div>
       <div class="setting-row danger-zone">
         <label>Start over</label>
-        <span class="hint">Wipes everything: calibration, actions, integration tokens, captured messages, call recordings, Claude Code session history. Back to the intro screen.</span>
+        <span class="hint">Wipes everything: calibration, actions, integration tokens, captured messages, call recordings, Talk chats, Claude Code session history. Back to the intro screen.</span>
         <button class="secondary danger" id="wipe-btn">Wipe everything…</button>
       </div>`;
     $('#theme-sel').value = state.config.theme || 'system';
@@ -1226,6 +1231,11 @@ function renderSettingsTab() {
       state.config.sensitivity = Number(e.target.value);
       await window.assemble.setConfig({ sensitivity: state.config.sensitivity });
       await startEngine();
+    };
+    $('#redo-onboarding').onclick = () => {
+      state.setupReturn = false;
+      state.setupStep = 0;
+      setMode('setup');
     };
     $('#wipe-btn').onclick = wipeEverything;
   }
@@ -1308,6 +1318,9 @@ async function wipeEverything() {
   state.config = await window.assemble.resetAll();
   state.classifier = new TapClassifier();
   state.activity = [];
+  localStorage.clear(); // voice pick, current chat
+  talk.chatId = null;
+  talk.chats = [];
   if (state.camera) { state.camera.stop(); state.camera = null; }
   applyTheme();
   $('#armed').checked = state.config.armed;
