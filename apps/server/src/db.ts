@@ -123,12 +123,13 @@ export function ensureTalkTables(db: Database): void {
   // per-chat reasoning toggle (added later — migrate existing tables)
   const cols = db.query<{ name: string }, []>(`PRAGMA table_info(talk_chats)`).all();
   if (!cols.some(c => c.name === 'reasoning')) {
-    db.exec(`ALTER TABLE talk_chats ADD COLUMN reasoning INTEGER NOT NULL DEFAULT 1`);
+    db.exec(`ALTER TABLE talk_chats ADD COLUMN reasoning INTEGER NOT NULL DEFAULT 0`);
   }
 }
 
 export function createTalkChat(db: Database): TalkChat {
-  const id = Number(db.run(`INSERT INTO talk_chats DEFAULT VALUES`).lastInsertRowid);
+  // reasoning starts off — thinking is opt-in per chat via the + menu
+  const id = Number(db.run(`INSERT INTO talk_chats (reasoning) VALUES (0)`).lastInsertRowid);
   return db.query<TalkChat, [number]>(`SELECT * FROM talk_chats WHERE id = ?`).get(id)!;
 }
 

@@ -9,7 +9,7 @@ import {
 } from '../controller';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
-import { Brain, Plus, Volume2, X } from 'lucide-react';
+import { Brain, Check, Plus, Volume2, X } from 'lucide-react';
 
 function useOrb(orbRef: React.RefObject<HTMLCanvasElement | null>, waveRef: React.RefObject<HTMLCanvasElement | null>) {
   useEffect(() => {
@@ -92,6 +92,7 @@ export function TalkPage() {
   const waveRef = useRef<HTMLCanvasElement>(null);
   const threadRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState('');
+  const [plusOpen, setPlusOpen] = useState(false);
   useOrb(orbRef, waveRef);
 
   useEffect(() => {
@@ -203,26 +204,59 @@ export function TalkPage() {
               <canvas ref={waveRef} height={88} className="h-11 flex-1 rounded-xl border border-acc/40" />
             ) : (
               <>
+                {(() => {
+                  const on = (talk.chats.find(c => c.id === talk.chatId)?.reasoning ?? 0) === 1;
+                  return (
+                    <div className="relative flex shrink-0 items-center gap-1.5">
+                      <button
+                        title="Chat options"
+                        onClick={() => setPlusOpen(o => !o)}
+                        className="flex size-9 cursor-pointer items-center justify-center rounded-full border border-line text-dim transition-colors hover:text-ink"
+                      >
+                        <Plus className={`size-4.5 transition-transform ${plusOpen ? 'rotate-45' : ''}`} />
+                      </button>
+                      {on && (
+                        <button
+                          title="Reasoning on — thinks before answering. Click to turn off."
+                          onClick={() => void setChatReasoning(false)}
+                          className="flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-acc/40 bg-acc/10 px-3 text-[13px] text-acc"
+                        >
+                          <Brain className="size-4" /> Reasoning
+                        </button>
+                      )}
+                      <AnimatePresence>
+                        {plusOpen && (
+                          <>
+                            <div className="fixed inset-0 z-40" onClick={() => setPlusOpen(false)} />
+                            <motion.div
+                              initial={{ opacity: 0, y: 6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: 6, scale: 0.98 }} transition={{ duration: 0.12 }}
+                              className="glass absolute bottom-11 left-0 z-50 min-w-[220px] rounded-xl border border-line p-1.5 shadow-xl"
+                            >
+                              <button
+                                className="flex w-full cursor-pointer items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-ink/7"
+                                onClick={() => { void setChatReasoning(!on); setPlusOpen(false); }}
+                              >
+                                <Brain className="size-4 text-dim" />
+                                <span className="flex-1">
+                                  Reasoning
+                                  <span className="block text-[11.5px] text-dim">Think before answering — deeper, slower</span>
+                                </span>
+                                {on && <Check className="size-4 text-acc" />}
+                              </button>
+                            </motion.div>
+                          </>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  );
+                })()}
                 <Input
                   placeholder="Type a message — or hold fn to talk"
                   value={input}
                   onChange={e => setInput(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') send(); }}
                 />
-                {(() => {
-                  const on = (talk.chats.find(c => c.id === talk.chatId)?.reasoning ?? 1) === 1;
-                  return (
-                    <button
-                      title={on ? 'Reasoning on — thinks before answering (slower)' : 'Reasoning off — answers directly'}
-                      onClick={() => void setChatReasoning(!on)}
-                      className={`flex size-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition-colors ${
-                        on ? 'border-acc/40 bg-acc/10 text-acc' : 'border-line text-dim hover:text-ink'
-                      }`}
-                    >
-                      <Brain className="size-4.5" />
-                    </button>
-                  );
-                })()}
                 <Button variant="secondary" onClick={send}>Send</Button>
               </>
             )}

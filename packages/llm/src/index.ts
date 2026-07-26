@@ -184,7 +184,7 @@ export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIn
 }
 
 /** Conversational turn — replies may be spoken aloud, so keep them tight. */
-export async function talkReply(llm: Llm, history: ChatMessage[], summary?: string | null, reasoning = true): Promise<string> {
+export async function talkReply(llm: Llm, history: ChatMessage[], summary?: string | null, reasoning = false): Promise<string> {
   return (await llm.chat([
     { role: 'system', content:
       'You are assemble, a local assistant running on the user\'s machine. ' +
