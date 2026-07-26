@@ -11,6 +11,9 @@ jobs:
   build:
     strategy:
       fail-fast: false
+      # serial: parallel jobs race electron-builder's find-or-create draft
+      # and produce duplicate draft releases for the same tag
+      max-parallel: 1
       matrix:
         include:
           # no intel-mac job: macos-13 (last x64) runners are retired — jobs
@@ -41,3 +44,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bunx electron-builder --publish always --${{ matrix.arch }}
+
+  publish:
+    # electron-builder leaves the release as a draft — flip it live once
+    # every platform's assets are uploaded
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release edit "$GITHUB_REF_NAME" -R "$GITHUB_REPOSITORY" --draft=false
