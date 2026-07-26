@@ -120,7 +120,7 @@ export function SidebarMenuButton({ className, isActive = false, tooltip, ...pro
       className={cn(
         'flex w-full cursor-pointer items-center gap-2.5 overflow-hidden rounded-lg p-2 text-left text-[13.5px] outline-none transition-colors',
         'text-dim hover:bg-ink/5 hover:text-ink focus-visible:ring-2 focus-visible:ring-acc',
-        'data-[active=true]:bg-acc-soft data-[active=true]:font-semibold data-[active=true]:text-acc data-[active=true]:shadow-[inset_2px_0_0_var(--acc)]',
+        'data-[active=true]:bg-acc-soft data-[active=true]:font-semibold data-[active=true]:text-acc',
         'group-data-[collapsible=icon]/sidebar:size-9 group-data-[collapsible=icon]/sidebar:justify-center group-data-[collapsible=icon]/sidebar:p-2',
         '[&>svg]:size-4 [&>svg]:shrink-0',
         '[&>span:last-child]:truncate group-data-[collapsible=icon]/sidebar:[&>span:last-child]:hidden',
