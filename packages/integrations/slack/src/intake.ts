@@ -9,7 +9,13 @@ export interface NormalizedMessage {
   text: string;
   threadTs: string | null;
   team: string | null;
+  /** Display name for bot/webhook posts (no user id to resolve). */
+  botName?: string | null;
 }
+
+// Subtypes worth keeping: humans (none), cross-posted thread replies, and
+// bot/webhook posts — automations post via webhooks and must be visible.
+const KEPT_SUBTYPES = new Set(['thread_broadcast', 'bot_message']);
 
 export interface EnrichedMessage extends NormalizedMessage {
   userName: string | null;
@@ -27,7 +33,7 @@ export function normalizeHistoryMessage(
   team?: string | null,
 ): NormalizedMessage | null {
   if (!msg || msg.type !== 'message') return null;
-  if (msg.subtype && msg.subtype !== 'thread_broadcast') return null;
+  if (msg.subtype && !KEPT_SUBTYPES.has(msg.subtype)) return null;
   if (!msg.text || !msg.ts) return null;
   return {
     slackTs: String(msg.ts),
@@ -37,6 +43,7 @@ export function normalizeHistoryMessage(
     text: String(msg.text),
     threadTs: msg.thread_ts ?? null,
     team: team ?? null,
+    botName: msg.subtype === 'bot_message' ? (msg.username ?? 'bot') : null,
   };
 }
 
@@ -49,7 +56,7 @@ export interface SlackIntake {
 // Pure: one Events-API message event → normalized message, or null for noise.
 export function normalizeEvent(event: any, team?: string | null): NormalizedMessage | null {
   if (!event || event.type !== 'message') return null;
-  if (event.subtype && event.subtype !== 'thread_broadcast') return null;
+  if (event.subtype && !KEPT_SUBTYPES.has(event.subtype)) return null;
   if (!event.text || !event.ts || !event.channel) return null;
   return {
     slackTs: String(event.ts),
@@ -59,6 +66,7 @@ export function normalizeEvent(event: any, team?: string | null): NormalizedMess
     text: String(event.text),
     threadTs: event.thread_ts ?? null,
     team: team ?? null,
+    botName: event.subtype === 'bot_message' ? (event.username ?? 'bot') : null,
   };
 }
 
@@ -184,7 +192,7 @@ export async function startSlack({
       if (!norm) return;
       onMessage({
         ...norm,
-        userName: await userName(norm.user),
+        userName: norm.user ? await userName(norm.user) : norm.botName ?? null,
         channelName: norm.channelType === 'im' ? 'DM' : await channelName(norm.channel),
         isSelf: norm.user === self,
       });
@@ -254,7 +262,7 @@ export async function startSlack({
       lastActivity.set(c.id, Date.now());
       onMessage({
         ...norm,
-        userName: await userName(norm.user),
+        userName: norm.user ? await userName(norm.user) : norm.botName ?? null,
         channelName: c.type === 'im' ? 'DM' : c.name,
         isSelf: norm.user === self,
       });

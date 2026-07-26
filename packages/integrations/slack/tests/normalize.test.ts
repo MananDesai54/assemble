@@ -58,3 +58,15 @@ describe('normalizeEvent (push transport)', () => {
     expect(normalizeEvent({ type: 'reaction_added' })).toBeNull();
   });
 });
+
+describe('bot/webhook messages', () => {
+  it('keeps bot_message with its display name', async () => {
+    const { normalizeEvent, normalizeHistoryMessage } = await import('../src/intake');
+    const ev = normalizeEvent({ type: 'message', subtype: 'bot_message', ts: '7.0', channel: 'C9', text: 'Hello, World!', username: 'automations' });
+    expect(ev?.text).toBe('Hello, World!');
+    expect(ev?.botName).toBe('automations');
+    expect(ev?.user).toBeNull();
+    const h = normalizeHistoryMessage({ type: 'message', subtype: 'bot_message', ts: '8.0', text: 'ping' }, 'C9', 'channel');
+    expect(h?.botName).toBe('bot');
+  });
+});
