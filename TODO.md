@@ -29,3 +29,31 @@
 3. Notes / learning section — standalone, no dependencies, but doesn't compound like #1.
 
 4. Fine-tune on usage — needs months of captured data first; capture is running, so this one just ripens on its own.
+
+┌────────────────────────────┬───────────────────────────────┬─────────────────────────────┐
+│ Component │ Cost │ Tauri effect │
+├────────────────────────────┼───────────────────────────────┼─────────────────────────────┤
+│ llama-server (12B model) │ ~7–8 GB RAM, battery when hot │ zero │
+├────────────────────────────┼───────────────────────────────┼─────────────────────────────┤
+│ whisper per call │ CPU spikes │ zero │
+├────────────────────────────┼───────────────────────────────┼─────────────────────────────┤
+│ Kokoro ONNX │ ~300 MB resident │ zero │
+├────────────────────────────┼───────────────────────────────┼─────────────────────────────┤
+│ bun server daemon │ ~100–200 MB │ zero — still ships │
+├────────────────────────────┼───────────────────────────────┼─────────────────────────────┤
+│ Electron chrome + renderer │ ~250–400 MB │ this shrinks, maybe −200 MB │
+└────────────────────────────┴───────────────────────────────┴─────────────────────────────┘
+
+Tauri wins: smaller binary (~10 MB vs 175 MB), faster launch, ~200 MB less RAM. Real but marginal — under 5% of your total footprint.
+
+Tauri costs:
+
+- Main-process layer rewritten in Rust: server spawn, tray, quick panel window, global shortcut plumbing, dock, IPC preload
+- WKWebView instead of Chromium: WebGL (Threads bg), AudioWorklet capture, speechSynthesis voices all behave differently on macOS vs Linux — re-test everything audio
+- Renderer stays React — that ports fine
+
+The performance you actually feel = engines sitting resident. That was the on-demand/idle-kill change you reverted today. Cheaper levers than Tauri, in order:
+
+1. Re-apply idle engine sleep (maybe with longer window, 30–60 min, or Settings toggle)
+2. Smaller brain when idle contexts (Gemma 4B for voice commands, 12B for talk)
+3. --reasoning-budget 0 already cut token burn
