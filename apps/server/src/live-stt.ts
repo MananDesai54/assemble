@@ -25,8 +25,11 @@ export function isNoiseSegment(text: string): boolean {
 }
 
 /**
- * Tails a growing WAV file and transcribes new audio every ~10 s, so the
- * transcript builds up live during the call instead of one big pass at stop.
+ * Tails a growing WAV file and transcribes new audio every ~2 min, so the
+ * transcript builds up during the call instead of one big pass at stop.
+ * Chunks are deliberately large: whisper's language auto-detect needs real
+ * speech context (10 s slices of Hinglish kept flipping to English), and
+ * fewer boundaries mean fewer mid-word artifacts.
  */
 export class LiveTranscriber {
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -45,7 +48,7 @@ export class LiveTranscriber {
   }) {}
 
   start(): void {
-    this.timer = setInterval(() => void this.tick(false), this.opts.intervalMs ?? 10_000);
+    this.timer = setInterval(() => void this.tick(false), this.opts.intervalMs ?? 120_000);
   }
 
   transcript(): string {
