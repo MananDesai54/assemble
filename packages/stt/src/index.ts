@@ -27,8 +27,27 @@ export async function transcribe(
     '-m', modelPath,
     '-f', wavPath,
     '-l', language,
+    '--max-context', '0', // don't carry text context across 30s windows — a
+                          // hallucination loop otherwise propagates through
+                          // the whole file (25 min call → 1.3k chars of loop)
     '--no-prints',   // suppress progress/system logs
     '--no-timestamps',
   ]);
-  return stdout.trim();
+  return collapseRepeats(stdout.trim());
+}
+
+/**
+ * Whisper's failure mode on noisy stretches is a decoder loop — the same
+ * phrase (or single char) repeated dozens of times. Collapse 3+ consecutive
+ * repeats to one instance; real speech rarely repeats a phrase verbatim 3×
+ * back-to-back with identical punctuation.
+ */
+export function collapseRepeats(text: string): string {
+  let out = text;
+  for (let pass = 0; pass < 4; pass++) {
+    const next = out.replace(/(.{2,120}?)(?:[,.\s]*\1){2,}/gsu, '$1');
+    if (next === out) break;
+    out = next;
+  }
+  return out;
 }
