@@ -45,7 +45,8 @@ export class Llm {
 
   async chat(
     messages: ChatMessage[],
-    { maxTokens = 512, temperature = 0.4, reasoning }: { maxTokens?: number; temperature?: number; reasoning?: boolean } = {},
+    // reasoning is opt-in: thinking stays off unless a call explicitly asks
+    { maxTokens = 512, temperature = 0.4, reasoning = false }: { maxTokens?: number; temperature?: number; reasoning?: boolean } = {},
   ): Promise<string> {
     const res = await this.fetchFn(this.endpoint(), {
       method: 'POST',
@@ -56,7 +57,7 @@ export class Llm {
       body: JSON.stringify({
         model: this.model, messages, max_tokens: maxTokens, temperature,
         // per-request thinking switch — llama-server renders it into the chat template
-        ...(this.templateControls && reasoning === false
+        ...(this.templateControls && !reasoning
           ? { chat_template_kwargs: { enable_thinking: false } }
           : {}),
       }),
@@ -112,7 +113,7 @@ export async function scoreUrgency(llm: Llm, msg: MessageLike): Promise<UrgencyV
       'Not urgent: FYIs, chitchat, threads they are not needed in, newsletters, bot noise. ' +
       'Reply with ONLY JSON: {"urgent": boolean, "reason": "short phrase"}' },
     { role: 'user', content: fmt(msg) },
-  ], { maxTokens: 400, temperature: 0, reasoning: false });
+  ], { maxTokens: 400, temperature: 0 });
   const parsed = extractJson(out) as Partial<UrgencyVerdict> | null;
   if (!parsed || typeof parsed.urgent !== 'boolean') return { urgent: false, reason: 'unparseable verdict' };
   return { urgent: parsed.urgent, reason: String(parsed.reason ?? '') };
@@ -138,7 +139,7 @@ export async function digestMessages(llm: Llm, messages: MessageLike[]): Promise
       'Summarize these Slack messages for a software engineer catching up. ' +
       'Group by topic, lead with anything that needs action, keep it under 8 bullet lines. Plain text.' },
     { role: 'user', content: body },
-  ], { maxTokens: 800, temperature: 0.3, reasoning: false })).trim();
+  ], { maxTokens: 800, temperature: 0.3 })).trim();
 }
 
 // Voice-intent catalog is deliberately closed: no arbitrary shell from voice —
@@ -165,7 +166,7 @@ export async function parseIntent(llm: Llm, transcript: string): Promise<VoiceIn
       'The command may be spoken in English, Hindi, Hinglish, or Gujarati — map by meaning. ' +
       'Never invent other kinds. When unsure choose none.' },
     { role: 'user', content: transcript },
-  ], { maxTokens: 512, temperature: 0, reasoning: false });
+  ], { maxTokens: 512, temperature: 0 });
   const fenced = out.match(/```(?:json)?\s*([\s\S]*?)```/);
   const raw = fenced ? fenced[1] : out;
   const start = raw.indexOf('{'); const end = raw.lastIndexOf('}');
@@ -206,7 +207,7 @@ export async function foldTalkSummary(llm: Llm, prevSummary: string | null, turn
     { role: 'user', content:
       `${prevSummary ? `Summary so far:\n${prevSummary}\n\n` : ''}New turns:\n` +
       turns.map(t => `${t.role}: ${t.content}`).join('\n') },
-  ], { maxTokens: 1024, temperature: 0.2, reasoning: false })).trim();
+  ], { maxTokens: 1024, temperature: 0.2 })).trim();
 }
 
 // Rolling refinement: transcripts of any length are summarized chunk by
@@ -228,7 +229,7 @@ export async function summarizeCall(llm: Llm, transcript: string): Promise<strin
       { role: 'user', content: summary
         ? `Summary of the call so far:\n${summary}\n\nNext part of the transcript:\n${chunk}`
         : chunk },
-    ], { maxTokens: 1200, temperature: 0.3, reasoning: false })).trim();
+    ], { maxTokens: 1200, temperature: 0.3 })).trim();
   }
   return summary;
 }
@@ -246,5 +247,5 @@ export async function draftReply(
       'no signatures, match casual Slack tone. Reply in the same language and script as the ' +
       'conversation (English, Hindi, Hinglish, or Gujarati). Reply with the message text only.' },
     { role: 'user', content: `Conversation:\n${thread}\n\nDraft a reply to: ${fmt(target)}` },
-  ], { maxTokens: 1024, temperature: 0.5, reasoning: false })).trim();
+  ], { maxTokens: 1024, temperature: 0.5 })).trim();
 }
