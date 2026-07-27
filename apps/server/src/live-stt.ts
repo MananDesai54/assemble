@@ -38,6 +38,7 @@ export class LiveTranscriber {
   constructor(private opts: {
     wavPath: string;
     modelPath: string;
+    language?: string;
     intervalMs?: number;
     onSegment: (segment: string, fullTranscript: string) => void;
     transcribeFn?: typeof transcribe;
@@ -69,7 +70,7 @@ export class LiveTranscriber {
       const chunkPath = `${this.opts.wavPath}.live.wav`;
       writeFileSync(chunkPath, wavFromPcm(buf));
       try {
-        const text = (await (this.opts.transcribeFn ?? transcribe)(chunkPath, { modelPath: this.opts.modelPath })).trim();
+        const text = (await (this.opts.transcribeFn ?? transcribe)(chunkPath, { modelPath: this.opts.modelPath, language: this.opts.language })).trim();
         this.offset += buf.length;
         if (!isNoiseSegment(text)) {
           this.segments.push(text);

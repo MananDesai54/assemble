@@ -13,6 +13,7 @@ interface ModelOption {
 }
 interface ModelsData {
   whisper: { options: ModelOption[]; selected: string };
+  sttLanguage: string;
   llm: { options: ModelOption[]; selected: string };
   byok: { source: 'local' | 'byok'; url: string; model: string; hasKey: boolean };
 }
@@ -67,6 +68,15 @@ export function ModelSelectors() {
     void refreshSetupStatus(); // selected model file may not be downloaded yet
     const label = data[kind].options.find(o => o.id === id)?.label ?? id;
     toast(`${kind === 'llm' ? 'Brain model' : 'Speech model'} → ${label}. Run "Install everything" if it needs a download.`);
+  };
+
+  const setSttLanguage = async (lang: string) => {
+    setData({ ...data, sttLanguage: lang });
+    await fetch(`${SERVER}/setup/models`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sttLanguage: lang }),
+    });
+    toast(lang === 'auto' ? 'Speech language: auto-detect.' : `Speech language pinned — applies to new recordings.`);
   };
 
   const setSource = async (source: 'local' | 'byok') => {
@@ -139,11 +149,25 @@ export function ModelSelectors() {
       {/* Speech model is always local — whisper transcribes calls/voice regardless of brain source. */}
       <ModelBlock
         title="Speech model"
-        hint="Transcribes calls and voice commands. Auto-detects English / Hindi / Hinglish."
+        hint="Transcribes calls and voice commands."
         options={data.whisper.options}
         selected={data.whisper.selected}
         onSelect={id => void pickModel('whisper', id)}
       />
+      <div className="glass flex flex-col gap-2 rounded-xl border border-line p-3.5">
+        <div className="flex flex-col gap-0.5">
+          <b className="text-sm">Spoken language</b>
+          <span className="text-[12.5px] text-dim">Auto-detect trips on Hinglish — mostly-Hindi speech can come out as English. Pin Hindi if that happens.</span>
+        </div>
+        <Select value={data.sttLanguage} onValueChange={v => void setSttLanguage(v)}>
+          <SelectTrigger className="max-w-[420px]"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">Auto-detect</SelectItem>
+            <SelectItem value="hi">Hindi / Hinglish (हिंदी)</SelectItem>
+            <SelectItem value="en">English</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
     </div>
   );
 }

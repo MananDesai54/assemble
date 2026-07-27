@@ -57,6 +57,9 @@ const agents = new AgentRunner();
 const selectedWhisper = () => kvGet(db, 'whisper_model') || DEFAULT_WHISPER;
 const selectedLlm = () => kvGet(db, 'llm_model') || DEFAULT_LLM;
 const activeWhisperPath = () => whisperPath(selectedWhisper());
+// spoken language for whisper: auto-detect trips on Hinglish (mostly-Hindi
+// speech comes back as English-ish text) — let the user pin it
+const sttLanguage = () => kvGet(db, 'stt_language') || 'auto';
 
 const ctx: IntegrationContext = {
   kv: { get: k => kvGet(db, k), set: (k, v) => kvSet(db, k, v), del: k => kvDel(db, k) },
@@ -103,6 +106,7 @@ app.get('/setup/models', c => {
   const b = byokConfig();
   return c.json({
     whisper: { options: WHISPER_MODELS, selected: selectedWhisper() },
+    sttLanguage: sttLanguage(),
     llm: { options: LLM_MODELS, selected: selectedLlm() },
     byok: { source: b.source, url: b.url, model: b.model, hasKey: Boolean(b.key) },
   });
@@ -134,8 +138,9 @@ app.post('/setup/byok', async c => {
 });
 
 app.post('/setup/models', async c => {
-  const { whisper, llm: llmId } = await c.req.json<{ whisper?: string; llm?: string }>();
+  const { whisper, llm: llmId, sttLanguage: lang } = await c.req.json<{ whisper?: string; llm?: string; sttLanguage?: string }>();
   if (whisper && WHISPER_MODELS.some(m => m.id === whisper)) kvSet(db, 'whisper_model', whisper);
+  if (lang && ['auto', 'hi', 'en'].includes(lang)) kvSet(db, 'stt_language', lang);
   if (llmId && LLM_MODELS.some(m => m.id === llmId)) {
     kvSet(db, 'llm_model', llmId);
     if (llmRuntime.running) {
@@ -143,7 +148,7 @@ app.post('/setup/models', async c => {
       llmCheckedAt = 0;
     }
   }
-  return c.json({ whisper: selectedWhisper(), llm: selectedLlm() });
+  return c.json({ whisper: selectedWhisper(), llm: selectedLlm(), sttLanguage: sttLanguage() });
 });
 
 let setupRunning = false;
@@ -245,6 +250,7 @@ function beginRecording(): number {
     const lt = new LiveTranscriber({
       wavPath: rec.wavPath,
       modelPath: activeWhisperPath(),
+      language: sttLanguage(),
       onSegment: (segment, full) => {
         updateRecording(db, id, { transcript: full });
         broadcast({ kind: 'recording', state: 'live-transcript', id, text: segment });
@@ -275,7 +281,7 @@ async function endRecording(): Promise<number | undefined> {
         notifyMac('assemble', 'Call transcribed.');
       } else {
         // no live segments (model missing at start, or all silence) — full pass
-        const full = await transcribe(rec.wavPath, { modelPath: activeWhisperPath() });
+        const full = await transcribe(rec.wavPath, { modelPath: activeWhisperPath(), language: sttLanguage() });
         updateRecording(db, id, { transcript: full, status: 'done' });
         notifyMac('assemble', 'Call transcribed.');
       }
@@ -454,7 +460,7 @@ app.post('/talk/chats/:id/audio', async c => {
   writeFileSync(wavPath, Buffer.from(body));
   let transcript: string;
   try {
-    transcript = (await transcribe(wavPath, { modelPath: activeWhisperPath() })).trim();
+    transcript = (await transcribe(wavPath, { modelPath: activeWhisperPath(), language: sttLanguage() })).trim();
   } catch (err) {
     return c.json({ error: `transcription failed: ${(err as Error).message} — open Setup` }, 503);
   } finally {
@@ -477,7 +483,7 @@ app.post('/stt', async c => {
   const wavPath = join(VOICE_DIR, `stt-${Date.now()}.wav`);
   writeFileSync(wavPath, Buffer.from(body));
   try {
-    const transcript = (await transcribe(wavPath, { modelPath: activeWhisperPath() })).trim();
+    const transcript = (await transcribe(wavPath, { modelPath: activeWhisperPath(), language: sttLanguage() })).trim();
     if (!transcript) return c.json({ error: 'heard nothing' }, 400);
     return c.json({ transcript });
   } catch (err) {
@@ -496,7 +502,7 @@ app.post('/voice', async c => {
 
   let transcript: string;
   try {
-    transcript = await transcribe(wavPath, { modelPath: activeWhisperPath() });
+    transcript = await transcribe(wavPath, { modelPath: activeWhisperPath(), language: sttLanguage() });
   } catch (err) {
     return c.json({ error: `transcription failed: ${(err as Error).message} — open Setup` }, 503);
   }
