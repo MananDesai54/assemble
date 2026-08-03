@@ -224,8 +224,14 @@ export async function summarizeCall(llm: Llm, transcript: string): Promise<strin
     summary = (await llm.chat([
       { role: 'system', content:
         'You maintain a running summary of a call transcript that arrives in parts. ' +
-        'Structure: one-line gist, key points (bullets), decisions, action items with owners if mentioned. ' +
-        'Merge the new part into the summary. Concise plain text; never mention that the transcript is partial.' },
+        'Be concrete. Keep every name, number, price, metric, date, deadline, and product/feature term ' +
+        'exactly as spoken. Write "X asked/said/decided …" — never vague filler like "the team discussed" ' +
+        'or "there is a need to". A reader who missed the call must learn the actual facts, not the vibe. ' +
+        'Structure: Gist — one specific line. Points — one bullet per concrete point (who, what, numbers). ' +
+        'Decisions — exact decision plus any condition. Actions — task, owner, deadline if said. ' +
+        'Open — unresolved questions. Omit any section with nothing in it. ' +
+        'The call may be in Hindi or Hinglish — summarize in English but keep spoken names and terms verbatim. ' +
+        'Merge the new part in without dropping earlier specifics. Plain text; never mention the transcript is partial.' },
       { role: 'user', content: summary
         ? `Summary of the call so far:\n${summary}\n\nNext part of the transcript:\n${chunk}`
         : chunk },
