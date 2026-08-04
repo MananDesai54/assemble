@@ -210,34 +210,45 @@ export async function foldTalkSummary(llm: Llm, prevSummary: string | null, turn
   ], { maxTokens: 1024, temperature: 0.2 })).trim();
 }
 
-// Rolling refinement: transcripts of any length are summarized chunk by
-// chunk — each round sees the summary so far plus the next slice, so nothing
-// past the model's context window is ever silently dropped.
+// Map-reduce: each chunk is summarized independently into concrete notes,
+// then one compose pass builds the final summary from all the notes. The
+// previous rolling-rewrite approach asked the model to merge "summary so
+// far + next chunk" — it favored fresh content and silently dropped the
+// first half of long calls.
 const CALL_CHUNK_CHARS = 10_000;
+
+const CALL_STYLE =
+  'Be concrete. Keep every name, number, price, metric, date, deadline, and product/feature term ' +
+  'exactly as spoken. Write "X asked/said/decided …" — never vague filler like "the team discussed" ' +
+  'or "there is a need to". The call may be in Hindi or Hinglish — write in English but keep spoken ' +
+  'names and terms verbatim. Plain text; never mention that the transcript is partial.';
 
 export async function summarizeCall(llm: Llm, transcript: string): Promise<string> {
   const text = transcript.trim();
   if (!text) return 'Empty recording.';
-  let summary = '';
-  for (let i = 0; i < text.length; i += CALL_CHUNK_CHARS) {
-    const chunk = text.slice(i, i + CALL_CHUNK_CHARS);
-    summary = (await llm.chat([
-      { role: 'system', content:
-        'You maintain a running summary of a call transcript that arrives in parts. ' +
-        'Be concrete. Keep every name, number, price, metric, date, deadline, and product/feature term ' +
-        'exactly as spoken. Write "X asked/said/decided …" — never vague filler like "the team discussed" ' +
-        'or "there is a need to". A reader who missed the call must learn the actual facts, not the vibe. ' +
-        'Structure: Gist — one specific line. Points — one bullet per concrete point (who, what, numbers). ' +
-        'Decisions — exact decision plus any condition. Actions — task, owner, deadline if said. ' +
-        'Open — unresolved questions. Omit any section with nothing in it. ' +
-        'The call may be in Hindi or Hinglish — summarize in English but keep spoken names and terms verbatim. ' +
-        'Merge the new part in without dropping earlier specifics. Plain text; never mention the transcript is partial.' },
-      { role: 'user', content: summary
-        ? `Summary of the call so far:\n${summary}\n\nNext part of the transcript:\n${chunk}`
-        : chunk },
-    ], { maxTokens: 1200, temperature: 0.3 })).trim();
-  }
-  return summary;
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += CALL_CHUNK_CHARS) chunks.push(text.slice(i, i + CALL_CHUNK_CHARS));
+
+  const notes = await Promise.all(chunks.map((chunk, i) => llm.chat([
+    { role: 'system', content:
+      'Extract notes from one part of a call transcript. One bullet per concrete point, decision, ' +
+      'action item, or open question — nothing skipped, no preamble. ' + CALL_STYLE },
+    { role: 'user', content: chunk },
+  ], { maxTokens: 800, temperature: 0.2 }).then(n => `Part ${i + 1} of ${chunks.length}:\n${n.trim()}`)));
+
+  if (chunks.length === 1) return composeFromNotes(llm, notes[0]);
+  return composeFromNotes(llm, notes.join('\n\n'));
+}
+
+async function composeFromNotes(llm: Llm, notes: string): Promise<string> {
+  return (await llm.chat([
+    { role: 'system', content:
+      'Compose a call summary from these notes, covering the WHOLE call — early parts get equal weight. ' +
+      'Structure: Gist — one specific line. Points — one bullet per concrete point (who, what, numbers). ' +
+      'Decisions — exact decision plus any condition. Actions — task, owner, deadline if said. ' +
+      'Open — unresolved questions. Omit any section with nothing in it. ' + CALL_STYLE },
+    { role: 'user', content: notes },
+  ], { maxTokens: 1200, temperature: 0.3 })).trim();
 }
 
 

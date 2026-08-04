@@ -151,16 +151,27 @@ describe('digestMessages context budget', () => {
   });
 });
 
-describe('summarizeCall rolling refinement', () => {
-  it('feeds each chunk with the summary so far', async () => {
+describe('summarizeCall map-reduce', () => {
+  it('notes each chunk independently, then composes from all notes', async () => {
     const calls: any[] = [];
-    const { llm } = fakeLlm('running summary', calls);
+    const { llm } = fakeLlm('notes', calls);
     const transcript = 'a'.repeat(25_000); // 3 chunks of 10k
     const out = await summarizeCall(llm, transcript);
-    expect(out).toBe('running summary');
-    expect(calls.length).toBe(3);
-    expect(calls[0].body.messages[1].content).not.toContain('Summary of the call so far');
-    expect(calls[1].body.messages[1].content).toContain('Summary of the call so far:\nrunning summary');
-    expect(calls[2].body.messages[1].content).toContain('Next part of the transcript');
+    expect(out).toBe('notes');
+    expect(calls.length).toBe(4); // 3 note passes + 1 compose
+    for (const c of calls.slice(0, 3)) {
+      expect(c.body.messages[0].content).toContain('Extract notes');
+    }
+    const compose = calls[3].body.messages[1].content as string;
+    expect(calls[3].body.messages[0].content).toContain('covering the WHOLE call');
+    expect(compose).toContain('Part 1 of 3');
+    expect(compose).toContain('Part 3 of 3');
+  });
+
+  it('single short call still gets one note pass and one compose pass', async () => {
+    const calls: any[] = [];
+    const { llm } = fakeLlm('short', calls);
+    await summarizeCall(llm, 'hello world');
+    expect(calls.length).toBe(2);
   });
 });
